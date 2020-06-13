@@ -1,0 +1,1951 @@
+
+-- Reverse is supported for the following operators, operations, iterative expressions, statements:
+-- +, -, *, /, log, exp, toInteger, toString, toRadians, toDegrees, not
+-- if-then-else-endif, 
+-- append, 
+-- any, select,
+-- resolveTemp (is skipped)
+-- collect (is skipped)
+-- if-then-else statement, binding statement
+
+
+module ATLReverse; 
+create OUT: ATL from IN: ATL, SOURCE: MOF, TARGET: MOF;
+
+------------------------------------------------------------------------------
+-- FLAGS FOR CODE VARIANTS
+------------------------------------------------------------------------------
+
+-- Flag for rule name reverse (RMatchedRule).
+-- False means inr.name is composed from outr.name
+-- True means inr.name is composed from source and target patterns of the rule.
+helper def: patternsBasedNameReverse: Boolean = false;
+
+-- Flag for a source pattern of a rule reverse (InPattern2OutPattern).
+-- True means for every element of the source pattern an element of 
+-- a target pattern of a backward rule is created.
+-- False means only the first element of the source pattern is used.
+helper def: sourcePatternFullReverse: Boolean = true;
+
+-- Flag for a target pattern of a rule reverse (OutPattern2InPattern).
+-- True means for every element of the target pattern an element of 
+-- a source pattern of a backward rule is created.
+
+-- False means only the first element of the target pattern is used.
+helper def: targetPatternFullReverse: Boolean = true;
+
+------------------------------------------------------------------------------
+-- GLOBAL VARIABLES
+------------------------------------------------------------------------------
+
+helper def: sourceMetamodelName: String = '';
+
+helper def: undefinedModelElement: ATL!OclModelElement =
+	ATL!OclModelElement.allInstances()->any(e | e.oclIsKindOf(ATL!OclModelElement));
+
+-- Used as a buffer for OclExpression copy rules.
+helper def: bufferExp: ATL!OclExpression =
+	ATL!OclExpression.allInstances()->any(e | e.oclIsKindOf(ATL!OclExpression));
+
+-- Used to store numbers of entries of newly created output pattern elements of a given type 
+-- in backward rules.
+-- Two sequences are used to emulate Map (remove is not supported in Map now).
+-- Key is a variable name, value is a number of entries.
+helper def: outputPatternElementNames: Sequence(String) = 
+	Sequence{};
+helper def: outputPatternElementEntries: Sequence(Integer) = 
+	Sequence{};
+
+-- Returns a value from 'outputPatternElementEntries' with the same index
+-- as 'key' has in 'outputPatternElementNames'.
+-- If 'key' is not presented in 'outputPatternElementNames' then '-1' is returned.
+helper def: opeGet(key: String): Integer =
+	if thisModule.outputPatternElementNames->includes(key) then
+		thisModule.outputPatternElementEntries->at(thisModule.outputPatternElementNames->indexOf(key))
+	else
+		0
+	endif;
+	
+rule opePut(key: String, value: Integer){
+	do{
+		if(thisModule.outputPatternElementNames.includes(key)){
+			thisModule.outputPatternElementEntries <-
+				let keys: Sequence(String) = thisModule.outputPatternElementNames in
+				let values: Sequence(Integer) = thisModule.outputPatternElementEntries in
+				let size: Integer = keys->size() in
+				let index: Integer = keys->indexOf(key) in
+					values->subSequence(1, index - 1)->
+					append(value)->
+					union(values->subSequence(index + 1, size))
+			;
+		}
+		else{
+			thisModule.outputPatternElementNames <- thisModule.outputPatternElementNames->append(key);
+			thisModule.outputPatternElementEntries <- thisModule.outputPatternElementEntries->append(value);
+		}
+	}
+}
+	
+------------------------------------------------------------------------------
+-- RULES
+------------------------------------------------------------------------------
+
+entrypoint rule Init(){	
+	to 
+		-- Create a special 'Undefined' model element.
+		e: ATL!OclModelElement(
+			name <- 'Undefined'
+		)
+	do{
+		thisModule.undefinedModelElement <-	ATL!OclModelElement.allInstances()->any(e | e.name = 'Undefined');
+	}
+}
+
+-- Module reverse
+rule RModule{
+	from inm: ATL!Module
+	to outm: ATL!Module(
+		commentsBefore <- Set{thisModule.atlCompilerVersion},
+		-- Module name reverse
+		name <- 
+			inm.outModels->collect(e | e.metamodel.name)->sum() + '2' + 		
+			inm.inModels->collect(e | e.metamodel.name)->sum(),
+		-- out-models became in-models
+		inModels <- inm.outModels->collect(e | thisModule.OclModelRename(e)),
+		-- in-models became out-models
+		outModels <- inm.inModels->collect(e | thisModule.OclModelRename(e)),
+		-- rules reverse
+		elements <- inm.elements
+	)
+	do{				
+		outm.inModels->size().debug('inModels');--DEBUG
+		outm.outModels->size().debug('outModels');--DEBUG				
+	}
+}
+
+-- Rename OCL model. If a model is called IN rename it into OUT and vice versa.
+-- Any other name states unchanged.
+unique lazy rule OclModelRename{
+	from inm: ATL!OclModel
+	to 
+	outm: ATL!OclModel(
+		name <- 
+			if inm.name = 'IN' then 'OUT' else
+				if inm.name = 'OUT' then 'IN' else
+					inm.name
+				endif 
+			endif,
+		metamodel <- thisModule.OclModelCopy(inm.metamodel)
+	)	
+	do{
+		inm.name.debug('inm');--DEBUG
+		inm.metamodel.name.debug('inm mm');--DEBUG
+		outm.name.debug('');--DEBUG
+		outm.metamodel.name.debug('metamodel');--DEBUG
+		
+		-- Set source metamodel name.
+		if(inm.name = 'IN'){
+			thisModule.sourceMetamodelName <- inm.metamodel.name;
+			''.debug('set sourceMetamodelName');--DEBUG
+			thisModule.sourceMetamodelName.debug('sourceMetamodelName');--DEBUG			
+		}		
+	}
+}
+
+-- An input model is just copied into output model. 
+unique lazy rule OclModelCopy{
+	from inm: ATL!OclModel
+	to outm: ATL!OclModel(
+		name <- inm.name,
+		elements <- inm.elements
+	)
+}
+
+rule OclModelElementCopy{
+	from inelm: ATL!OclModelElement
+	to outelm: ATL!OclModelElement(
+		name <- inelm.name
+	)
+}
+
+-- Create an element of OUT model (a target model of reverse ATL transformation,
+-- created as a copy of a source model of forward transformation)
+-- on the base of a classifier (the classifier should be of the 
+-- source model of forward transformation).  
+lazy rule EClassifier2OutModelElement{
+	from cl: MOF!EClassifier
+	to e: ATL!OclModelElement(
+		name <- cl.name
+	)
+	do{
+		-- It is not possible to choose a concrete model for an element, so any model is chosen.
+		-- For on-to-one model transformation it is the right way.
+		e.model <- ATL!OclModel.allInstances()->
+					select(e | e.name = 'OUT')->
+					select(e | e.metamodel.name = thisModule.sourceMetamodelName)->
+					any(e | e.oclIsKindOf(ATL!OclModel)).metamodel;
+	}
+}
+
+-- Matched rule reverse.
+
+rule RMatchedRule{
+from inr: ATL!MatchedRule
+	using{
+
+	}
+	to outr: ATL!MatchedRule(
+		commentsBefore <- Set{'-- Matched Rule'},
+		-- name reverse
+		name <- if thisModule.patternsBasedNameReverse then 
+						inr.reverseRuleName
+					else 
+						inr.name.reverseRuleName
+					endif,
+		
+		inPattern <- inr.outPattern,
+		outPattern <- inr.inPattern,
+		
+		actionBlock <- actions
+	),
+	actions: ATL!ActionBlock
+	do{			
+		outr.name.debug('Rule bindings reverse');--DEBUG			
+		
+		-- Create bindings on the basis of bindings from all elements of target pattern.		
+		for(e in inr.outPattern.elements){
+			for(b in e.bindings){
+				thisModule.RBindingInit(b, outr);
+			}				
+		}
+
+		outr.name.debug('Rule statements reverse');--DEBUG					
+		
+		-- Create statements on the basis of statements from action block.
+		if(not inr.actionBlock.oclIsUndefined()){
+			for(s in inr.actionBlock.statements){
+				thisModule.RStatement(s, outr);
+			}		
+		}
+	}
+}
+
+-- Out pattern reverse
+rule OutPattern2InPattern{
+	from op: ATL!OutPattern
+	to ip: ATL!InPattern(
+		elements <- 
+			if thisModule.targetPatternFullReverse then
+				op.elements
+			else
+				Set{op.elements->asSequence()->first()}
+			endif
+	)
+}
+
+-- Simple out pattern element reverse
+rule SimpleOutPatternElement2SimpleInPatternElement{
+	from opelm: ATL!SimpleOutPatternElement
+	to ipelm: ATL!SimpleInPatternElement(
+		varName <- opelm.varName,
+		type <- opelm.type
+	)
+}
+
+-- In pattern reverse
+rule InPattern2OutPattern{
+	from ip: ATL!InPattern
+	to op: ATL!OutPattern(
+		elements <- 
+			if thisModule.sourcePatternFullReverse then
+				ip.elements
+			else
+				Set{ip.elements->asSequence()->first()}		
+			endif
+	)
+	do{
+		thisModule.RFilter(ip.filter);
+	}
+}
+
+-- Reverse in pattern filter.
+-- Filter should be the following:
+-- v1.f1 = c1 and ... and vn.fn = cn
+-- where 'vi' is an in pattern element, 
+-- 'fi' is a feature, 'ci' is a constant expression. 
+lazy rule RFilter{
+	from filter: ATL!OclExpression
+	to b: ATL!Binding
+	do{				
+		if(not filter.oclIsUndefined())
+		if(filter.oclIsKindOf(ATL!OperatorCallExp)){
+			if(filter.operationName = '=')
+			if(not filter.source.oclIsUndefined())	
+			if(filter.source.oclIsKindOf(ATL!NavigationOrAttributeCallExp))
+			if(not filter.source.source.oclIsUndefined())		
+			if(filter.source.source.oclIsKindOf(ATL!VariableExp))
+			if(not filter.source.source.referredVariable.oclIsUndefined())		
+			{				
+				b.propertyName <- filter.source.name;
+							
+				thisModule.CopyOclExpression(filter.arguments->asSequence()->first());
+				b.value <- thisModule.bufferExp;
+				
+				b.outPatternElement <- thisModule.resolveTemp(filter.source.source.referredVariable, 'opelm');
+			}
+			else
+			if(filter.operationName = 'and'){
+				thisModule.RFilter(filter.source);
+				thisModule.RFilter(filter.arguments->asSequence()->first());
+			}
+		}		
+	}
+}
+
+-- Simple in pattern element reverse
+rule SimpleInPatternElement2SimpleOutPatternElement{
+	from ipelm: ATL!SimpleInPatternElement
+	to opelm: ATL!SimpleOutPatternElement(
+		varName <- ipelm.varName,
+		type <- ipelm.type
+	)
+}
+
+-- Initial step for binding reverse.
+-- Create source expression for RBinding rule.
+lazy rule RBindingInit{
+	from inb: ATL!Binding,
+		r: ATL!MatchedRule
+	to 	outExp: ATL!NavigationOrAttributeCallExp(
+			name <- inb.propertyName,
+			source <- sourceExp
+		),
+		sourceExp: ATL!VariableExp(
+			referredVariable <- inb.outPatternElement
+		)
+	do{
+		inb.propertyName.debug('Init binding property');--DEBUG
+		inb.value.containsInPatternElement.debug('containsInPatternElement');--DEBUG
+						
+		-- 'targetExp' contains no in pattern element: it should be a constant expression.
+		-- Reverse to 'from' condition (filter).
+		if(not inb.value.containsInPatternElement){
+			thisModule.RConstantBinding(inb.propertyName, inb.outPatternElement, inb.value, r);
+		}
+		else			
+		-- Forward target feature is of a class type, 'resolveTemp' call is required
+		-- for implicit call of the class matching rule.
+		if(MOF!EStructuralFeature.allInstancesFrom('TARGET')->any(e | e.name = inb.propertyName).eType.oclIsKindOf(MOF!EClass)){
+			
+			''.debug('InPatternElement exists');--DEBUG
+			inb.value.getDeepestSourceFeatureName.debug('property co-image');
+			
+			-- Forward target feature is one-to-one association, simple 'resolveTemp' call is required.
+			if(MOF!EStructuralFeature.allInstancesFrom('TARGET')->any(e | e.name = inb.propertyName).upperBound = 1){
+				thisModule.RBinding(thisModule.CResolveTempCall(inb.value.getDeepestSourceFeatureName, outExp), inb.value, r);
+			}
+			-- Forward target feature is one-to-many association, 
+			-- 		collect(e, thisModule.resolveTemp(e, 'elm'))
+			-- call is required.
+			else{
+				thisModule.RBinding(thisModule.CCollectResolveTempCall(inb.value.getDeepestSourceFeatureName, outExp), inb.value, r);
+			}
+		}
+		-- Forward target feature is not of a class type, 'resolveTemp' call is not required.
+		else{
+			thisModule.RBinding(outExp, inb.value, r);
+		}				
+	}
+}
+
+-- Reverse binding with constant value expression into 
+-- input pattern filter of backward rule.
+lazy rule RConstantBinding{
+	from propertyName: String,
+		outPatternElement: ATL!OutPatternElement,
+		value: ATL!OclExpression,
+		r: ATL!MatchedRule
+	to andOpCall: ATL!OperatorCallExp(
+			operationName <- 'and'
+		),
+		eqOpCall: ATL!OperatorCallExp(
+			operationName <- '=',
+			source <- eqSource			
+		),
+		eqSource: ATL!NavigationOrAttributeCallExp(
+			name <- propertyName,
+			source <- varExp			
+		),
+		varExp: ATL!VariableExp(
+			referredVariable <- thisModule.resolveTemp(outPatternElement, 'ipelm')
+		)
+	do{
+		propertyName.debug('RConstantBinding');--DEBUG
+
+		thisModule.CopyOclExpression(value);
+		eqOpCall.arguments <- Sequence{thisModule.bufferExp};
+		
+		if(thisModule.bufferExp.oclIsKindOf(ATL!StringExp)) thisModule.bufferExp.stringSymbol.debug('filter string');
+		
+		-- Filter is empty yet.
+		if(r.inPattern.filter.oclIsUndefined()){
+			r.inPattern.filter <- eqOpCall;
+		}
+		else{
+			andOpCall.source <- r.inPattern.filter;
+			andOpCall.arguments <- Sequence{eqOpCall};			
+			
+			r.inPattern.filter <- andOpCall;			
+		}				
+	}
+}
+
+
+-- Operation call
+-- 		thisModule.resolveTemp(e, 'elm')
+-- is created.
+lazy rule CResolveTempCall{
+	from propertyName: String,
+		sourceExp: ATL!OclExpression
+	using{
+		bindingPropertyTypeName: String =  
+			let f: MOF!EStructuralFeature =
+					MOF!EStructuralFeature.allInstancesFrom('SOURCE')->
+					any(e | e.name = propertyName)
+			in 
+				if f.oclIsUndefined() 
+				then 'UndefinedType'
+				else f.eType.name
+				endif;
+
+		propertyTypeMatchedRule: ATL!MatchedRule =
+			let arule: ATL!MatchedRule = ATL!MatchedRule.allInstancesFrom('IN')->
+					any(r | r.inPattern.elements->exists(e | e.type.name = bindingPropertyTypeName))
+			in
+				if not arule.oclIsUndefined() then
+					arule
+				else	
+					ATL!MatchedRule.allInstancesFrom('IN')->
+						any(r | r.inPattern.elements->exists(e | e.type.name.isSubclassOf(bindingPropertyTypeName, 'SOURCE')))
+				endif;
+
+		propertyTypeMatchedRuleElementName: String = 
+			if propertyTypeMatchedRule.oclIsUndefined()
+			then bindingPropertyTypeName.variableName
+			else propertyTypeMatchedRule.inPattern.elements->
+					any(e | e.type.name.isSubclassOf(bindingPropertyTypeName, 'SOURCE')).varName
+			endif;
+	}
+	to 
+		resolveTempCall: ATL!OperationCallExp(
+			operationName <- 'resolveTemp',
+			source <- varExp,
+			arguments <- Sequence{sourceExp, str}			
+		),
+		varExp: ATL!VariableExp(
+			referredVariable <- varDecl
+		),
+		varDecl: ATL!VariableDeclaration(
+			varName <- 'thisModule'
+		),
+		str: ATL!StringExp(
+			stringSymbol <- propertyTypeMatchedRuleElementName
+		)	
+	do{
+		bindingPropertyTypeName.debug('bindingPropertyTypeName');--DEBUG
+	}
+}
+
+-- Operation call
+-- 		collect(e, thisModule.resolveTemp(e, 'elm'))
+-- is created.
+lazy rule CCollectResolveTempCall{
+	from propertyName: String,
+		sourceExp: ATL!OclExpression
+	using{
+		bindingPropertyTypeName: String =  
+			let f: MOF!EStructuralFeature =
+					MOF!EStructuralFeature.allInstancesFrom('SOURCE')->
+					any(e | e.name = propertyName)
+			in 
+				if f.oclIsUndefined() 
+				then 'UndefinedType'
+				else f.eType.name
+				endif;
+
+		propertyTypeMatchedRule: ATL!MatchedRule =
+			let arule: ATL!MatchedRule = ATL!MatchedRule.allInstancesFrom('IN')->
+					any(r | r.inPattern.elements->exists(e | e.type.name = bindingPropertyTypeName))
+			in
+				if not arule.oclIsUndefined() then
+					arule
+				else	
+					ATL!MatchedRule.allInstancesFrom('IN')->
+						any(r | r.inPattern.elements->exists(e | e.type.name.isSubclassOf(bindingPropertyTypeName, 'SOURCE')))
+				endif;
+
+		propertyTypeMatchedRuleElementName: String = 
+			if propertyTypeMatchedRule.oclIsUndefined()
+			then bindingPropertyTypeName.variableName
+			else propertyTypeMatchedRule.inPattern.elements->
+					any(e | e.type.name.isSubclassOf(bindingPropertyTypeName, 'SOURCE')).varName
+			endif;
+	}
+	to	collectExp: ATL!IteratorExp(
+			name <- 'collect',
+			source <- sourceExp,
+			iterators <- Set{collectIt},
+			body <- collectOp
+		),
+		collectIt: ATL!Iterator(
+			varName <- 'e'
+		),
+		collectOp: ATL!OperationCallExp(
+			operationName <- 'resolveTemp',
+			source <- collectSourceVarExp,
+			arguments <- Sequence{resolveTempArgVarExp, collectStr}
+		),
+		collectSourceVarExp: ATL!VariableExp (
+			referredVariable <- collectSourceVarDecl
+		),
+		collectSourceVarDecl: ATL!VariableDeclaration(
+			varName <- 'thisModule'
+		),
+		resolveTempArgVarExp: ATL!VariableExp(
+			referredVariable <- collectIt
+		),
+		collectStr: ATL!StringExp(
+			stringSymbol <- propertyTypeMatchedRuleElementName
+		)
+}
+
+-- Reverse of a binding.
+rule RBinding(sourceExp: ATL!PropertyCallExp, targetExp: ATL!OclExpression, r: ATL!MatchedRule){
+	do{
+		
+		if(not(targetExp.oclIsUndefined())){
+		
+			-- If targetExp is a feature call, create new binding			
+			if(targetExp.oclIsKindOf(ATL!NavigationOrAttributeCallExp)){
+				thisModule.CBinding(sourceExp, targetExp, r);	
+			}
+			else
+			-- Iterator expression reverse				
+			if(targetExp.oclIsKindOf(ATL!IteratorExp)){
+				thisModule.RIteratorExpInit(sourceExp, targetExp, r);
+			}
+			else
+			-- Operator Call reverse
+			if(targetExp.oclIsKindOf(ATL!OperatorCallExp)){
+				thisModule.ROperatorCall(sourceExp, targetExp, r);	
+			}
+			else
+			-- Collection Operation Call reverse
+			if(targetExp.oclIsKindOf(ATL!CollectionOperationCallExp)){
+				thisModule.RCollectionOperationCall(sourceExp, targetExp, r);
+			}			
+			else
+			-- Operation Call reverse
+			if(targetExp.oclIsKindOf(ATL!OperationCallExp)){
+				thisModule.ROperationCall(sourceExp, targetExp, r);	
+			}
+			else
+			-- if-then-else-endif reverse
+			if(targetExp.oclIsKindOf(ATL!IfExp)){
+				if(targetExp.thenExpression.containsInPatternElement){
+					thisModule.RBinding(sourceExp, targetExp.thenExpression, r);
+				}
+				else 
+				if(targetExp.elseExpression.containsInPatternElement){
+					thisModule.RBinding(sourceExp, targetExp.elseExpression, r);
+				}
+			}
+		}
+	}
+}
+
+
+-- Creation of a reverse binding on the basis of a binding
+lazy rule CBinding{
+	from sourceExp: ATL!PropertyCallExp,
+		targetExp: ATL!PropertyCallExp,
+		r: ATL!MatchedRule
+	to b: ATL!Binding
+	do{
+		-- The end of the target path.
+		-- Target exp is a feature call and its source is a variable.
+		-- s <- v.f => f <- w.s
+		if(not(targetExp.oclIsUndefined()))
+		if(targetExp.oclIsKindOf(ATL!NavigationOrAttributeCallExp))
+		if(not(targetExp.source.oclIsUndefined()))
+		if(targetExp.source.oclIsKindOf(ATL!VariableExp))
+		if(not(targetExp.source.referredVariable.oclIsUndefined()))
+		if(targetExp.source.referredVariable.oclIsKindOf(ATL!SimpleInPatternElement)){
+			b.propertyName <- targetExp.name;
+			b.propertyName.debug('Reverse binding: target feature'); --DEBUG			
+			b.value <- sourceExp;
+			b.outPatternElement <- thisModule.resolveTemp(targetExp.source.referredVariable, 'opelm');
+		}
+
+		-- Middle of the target path.
+		-- Target exp is a feature call and its source is NOT a variable.		
+		-- Additional output pattern element is created.
+		-- s <- t.f => f <- s, v <- t
+		-- Here 'v' is a new output pattern element.
+		if(not(targetExp.oclIsUndefined()))
+		if(targetExp.oclIsKindOf(ATL!NavigationOrAttributeCallExp))
+		if(not(targetExp.source.oclIsUndefined()))
+		if(not(targetExp.source.oclIsKindOf(ATL!VariableExp))){
+			b.propertyName <- targetExp.name;
+			r.name.debug('rule');--DEBUG			
+			b.propertyName.debug('Reverse binding: target feature in the middle'); --DEBUG			
+			b.value <- sourceExp;
+			targetExp.sourceType('SOURCE').name.debug('Source type');--DEBUG
+			
+			-- add new OutPatternElement to the rule
+			b.outPatternElement <- thisModule.RBindingPathElement(targetExp.sourceType('SOURCE'), targetExp.source, r);
+		}			
+	}
+}
+
+-- Reverse binding path element: create new out pattern element.
+lazy rule RBindingPathElement{
+	from cl: MOF!EClassifier,
+		targetExp: ATL!PropertyCallExp,
+		r: ATL!MatchedRule
+	to opelm: ATL!SimpleOutPatternElement(
+		--varName <- cl.name.variableName,
+		type <- thisModule.EClassifier2OutModelElement(cl)
+	),
+	varExp: ATL!VariableExp(
+		referredVariable <- opelm
+	)
+	do{
+		-- Set output element name. 
+		-- A rule may contain several entries of an element of the same type,
+		-- so different names are provided.
+		if(thisModule.opeGet(cl.name.variableName) = 0 ){
+			''.debug('new ope var');			
+			thisModule.opePut(cl.name.variableName, 1);
+			opelm.varName <- cl.name.variableName + '1';
+		}
+		else{
+			thisModule.opePut(cl.name.variableName, thisModule.opeGet(cl.name.variableName) + 1);
+			opelm.varName <- cl.name.variableName + thisModule.opeGet(cl.name.variableName).toString();
+		}
+		
+		-- Add new OutPatternElement to the rule
+		r.outPattern.elements <- r.outPattern.elements.including(opelm);	
+		
+		-- Reverse the rest of path
+		thisModule.RBinding(varExp, targetExp, r);
+	}
+}
+
+-- Checking preconditions for the reverse of an iterator expression into statement.
+rule RIteratorExpInit(sourceExp: ATL!PropertyCallExp, targetExp: ATL!IteratorExp, r: ATL!MatchedRule){
+	do{
+		-- Reverse is provided for 'any' and 'select' iterative expressions.
+		if(targetExp.name = 'any' or targetExp.name = 'select'){
+			if(not targetExp.source.oclIsUndefined()){
+				-- Source of an iterative expression should be a feature call.
+				if(targetExp.source.oclIsKindOf(ATL!NavigationOrAttributeCallExp)){			
+					thisModule.RIteratorExp(sourceExp, targetExp, r);
+				}
+			}			
+		}
+		else
+		-- 'collect' is skipped.
+		if(targetExp.name = 'collect'){
+			thisModule.RBinding(sourceExp, targetExp.source, r);
+		}
+	}
+}
+
+-- Reverse of an iterator expression into statement.
+-- Reverse is provided for 'any' and 'select' iterative expressions.
+lazy rule RIteratorExp{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!IteratorExp, 
+		r: ATL!MatchedRule
+	to st: ATL!BindingStat(
+			value <- op,
+			source <- stSource
+		),
+		stSource: ATL!NavigationOrAttributeCallExp(
+			name <- targetExp.source.name,
+			source <- stSourceSource
+		),
+		stSourceSource: ATL!VariableExp,
+		op: ATL!CollectionOperationCallExp(
+			source <- opSource,
+			arguments <- Sequence{sourceExp}
+		),
+		opSource: ATL!NavigationOrAttributeCallExp(
+			name <- targetExp.source.name,
+			source <- opSourceSource			
+		),
+		opSourceSource: ATL!VariableExp
+	do{
+		
+		r.actionBlock.statements <- r.actionBlock.statements->including(st);
+		
+		-- Set a name of a collection operation in a reverse statement.
+		if(targetExp.name = 'any'){			
+			op.operationName <- 'including';
+		}
+		else
+		if(targetExp.name = 'select'){
+			op.operationName <- 'union';
+		}
+		targetExp.name.debug('Iterator');
+		
+		-- The end of the target path.
+		-- Target exp source is a feature call and its source is a variable 'v'.
+		-- s <- v.f.any() => v.f <- v.f->including(s)
+		if(not(targetExp.source.source.oclIsUndefined()))
+		if(targetExp.source.source.oclIsKindOf(ATL!VariableExp))
+		if(not(targetExp.source.source.referredVariable.oclIsUndefined()))
+		if(targetExp.source.source.referredVariable.oclIsKindOf(ATL!SimpleInPatternElement)){						
+			targetExp.source.name.debug('Reverse iterator: target feature'); --DEBUG			
+
+			stSourceSource.referredVariable <- thisModule.resolveTemp(targetExp.source.source.referredVariable, 'opelm');
+			opSourceSource.referredVariable <- thisModule.resolveTemp(targetExp.source.source.referredVariable, 'opelm');
+		}
+
+		-- Middle of the target path.
+		-- Target exp source is a feature call and its source is NOT a variable.		
+		-- Additional output pattern element is created.
+		-- s <- t.f->any() => v.f <- v.f->including(s), v <- t
+		-- Here 'v' is a new output pattern element.
+		if(not(targetExp.source.source.oclIsUndefined()))
+		if(not(targetExp.source.source.oclIsKindOf(ATL!VariableExp))){
+			targetExp.source.name.debug('Reverse iterator: target feature in the middle'); --DEBUG						
+			targetExp.sourceType('SOURCE').name.debug('Source type');--DEBUG
+			
+			-- add new OutPatternElement to the rule
+			stSourceSource.referredVariable <- 
+				thisModule.RBindingPathElement(targetExp.source.sourceType('SOURCE'), targetExp.source.source, r);
+			opSourceSource.referredVariable <- stSourceSource.referredVariable;
+		}
+		
+	}
+}
+
+-- Reverse operator call.
+rule ROperatorCall(sourceExp: ATL!PropertyCallExp, targetExp: ATL!OperatorCallExp, r: ATL!MatchedRule){
+	do{
+		targetExp.operationName.debug('Operator name');--DEBUG
+		targetExp.containsInPatternElement.debug('containsInPatternElement');--DEBUG
+		
+		-- Binary operators
+		if( not(targetExp.source.oclIsUndefined()) and targetExp.arguments->size() > 0 ){						
+			-- Operator '+' on String
+			if( targetExp.operationName = '+' 
+				and 
+				(targetExp.arguments->asSequence()->first().oclIsKindOf(ATL!StringExp) or 
+					targetExp.source.oclIsKindOf(ATL!StringExp)) )
+			{
+				thisModule.RStringConcat(sourceExp, targetExp, r);			
+			}
+			else
+			-- Binary operators on Real
+			if( (targetExp.operationName = '*' or targetExp.operationName = '/' or 
+					targetExp.operationName = '+' or targetExp.operationName = '-') 
+				and 
+				(targetExp.arguments->asSequence()->first().oclIsKindOf(ATL!RealExp) or 
+					targetExp.source.oclIsKindOf(ATL!RealExp)) )
+			{
+				thisModule.RRealBinaryOperator(sourceExp, targetExp, r);
+			}
+			-- Binary operators on Integer
+			else
+			if( (targetExp.operationName = '*' or targetExp.operationName = '/' or
+					targetExp.operationName = '+' or targetExp.operationName = '-') 
+				and 
+				(targetExp.arguments->asSequence()->first().oclIsKindOf(ATL!IntegerExp) or 
+					targetExp.source.oclIsKindOf(ATL!IntegerExp)) )
+			{
+				thisModule.RIntegerBinaryOperator(sourceExp, targetExp, r);
+			}
+		}
+		else		
+		-- Boolean operator 'not'
+		if(targetExp.operationName = 'not'){
+			''.debug('Boolean not operator');--DEBUG 
+			thisModule.RBooleanNotOperator(sourceExp, targetExp, r);
+		}
+			
+	}
+}
+
+-- Reverse string concatenation operator.
+lazy rule RStringConcat{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!OperatorCallExp, 
+		r: ATL!MatchedRule
+	to letExp: ATL!LetExp(
+			variable <- letVar,
+			in_ <- substringOp
+		),
+		letVar: ATL!VariableDeclaration(
+			varName <- 'str',
+			type <- stringType,
+			initExpression <- sourceExp
+		),
+		stringType: ATL!StringType(),
+		substringOp: ATL!OperationCallExp(
+			operationName <- 'substring',
+			source <- substringSource
+		),
+		substringSource: ATL!VariableExp(
+			referredVariable <- letVar
+		),		
+		numExp: ATL!IntegerExp,
+		sourceSizeExp: ATL!OperationCallExp(
+			operationName <- 'size', 
+			source <- sourceSizeExpSource
+		),
+		sourceSizeExpSource: ATL!VariableExp(
+			referredVariable <- letVar
+		),		
+		sizeExp: ATL!IntegerExp,
+		minusExp: ATL!OperatorCallExp(operationName <- '-')		
+
+	do{		
+		-- Second argument of a concatenation is string expression.
+		-- s <- t + c =>  let str: string = s in str.substring(1, str.size() - c.size()) <- t
+		if(targetExp.arguments->asSequence()->first().oclIsKindOf(ATL!StringExp)){
+			targetExp.arguments->asSequence()->first().stringSymbol.debug('string symbol');--DEBUG
+			
+			substringOp.arguments <- Sequence{numExp, minusExp};
+			numExp.integerSymbol <- 1;
+			minusExp.source <- sourceSizeExp;
+			minusExp.arguments <- Sequence{sizeExp};
+			sizeExp.integerSymbol <- targetExp.arguments->asSequence()->first().stringSymbol.size();			
+			
+			thisModule.RBinding(letExp, targetExp.source, r);								
+		} 
+		else
+		-- First argument of a concatenation is string expression.			
+		-- s <- c + t =>  let str: string = s in str.substring(c.size() + 1, str.size()) <- t		
+		if(targetExp.source.oclIsKindOf(ATL!StringExp)){
+			targetExp.source.stringSymbol.debug('string symbol');--DEBUG
+
+			substringOp.arguments <- Sequence{numExp, sourceSizeExp};
+			numExp.integerSymbol <- targetExp.source.stringSymbol.size() + 1; 
+			
+			thisModule.RBinding(letExp, targetExp.arguments->asSequence()->first(), r);								
+		}				
+	}
+}
+
+-- Reverse binary operators on Integer.
+lazy rule RIntegerBinaryOperator{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!OperatorCallExp, 
+		r: ATL!MatchedRule
+	to op: ATL!OperatorCallExp,
+		arg: ATL!IntegerExp
+	do{		
+		-- Second argument of an operator is an integer expression.
+		if(targetExp.arguments->asSequence()->first().oclIsKindOf(ATL!IntegerExp)){
+			targetExp.arguments->asSequence()->first().integerSymbol.debug('integer symbol');--DEBUG
+			
+			arg.integerSymbol <- targetExp.arguments->asSequence()->first().integerSymbol;
+			
+			-- s <- t + c => s - c <- t
+			if(targetExp.operationName = '+'){
+				op.operationName <- '-';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- t - c => s + c <- t			
+			if(targetExp.operationName = '-'){
+				op.operationName <- '+';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};				
+			}
+			-- s <- t * c => s / c <- t						
+			if(targetExp.operationName = '*'){
+				op.operationName <- '/';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- t / c => s * c <- t									
+			if(targetExp.operationName = '/'){
+				op.operationName <- '*';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};				
+			}		
+			
+			thisModule.RBinding(op, targetExp.source, r);								
+		} 
+		else
+		-- First argument of an operator is an integer expression.			
+		if(targetExp.source.oclIsKindOf(ATL!IntegerExp)){
+			targetExp.source.integerSymbol.debug('integer symbol');--DEBUG
+
+			arg.integerSymbol <- targetExp.source.integerSymbol;
+
+			-- s <- c + t => s - c <- t			
+			if(targetExp.operationName = '+'){
+				op.operationName <- '-';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- c - t => c - s <- t						
+			if(targetExp.operationName = '-'){
+				op.operationName <- '-';
+				op.source <- arg;
+				op.arguments <- Sequence{sourceExp};				
+			}
+			-- s <- c * t => s / c <- t									
+			if(targetExp.operationName = '*'){
+				op.operationName <- '/';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- c / t => s / c <- t												
+			if(targetExp.operationName = '/'){
+				op.operationName <- '/';
+				op.source <- arg;
+				op.arguments <- Sequence{sourceExp};				
+			}			
+			
+			thisModule.RBinding(op, targetExp.arguments->asSequence()->first(), r);								
+		}				
+	}	
+}
+
+-- Reverse binary operators on Real.
+lazy rule RRealBinaryOperator{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!OperatorCallExp, 
+		r: ATL!MatchedRule
+	to op: ATL!OperatorCallExp,
+		arg: ATL!RealExp
+	do{		
+		-- Second argument of an operator is a real expression.
+		if(targetExp.arguments->asSequence()->first().oclIsKindOf(ATL!RealExp)){
+			targetExp.arguments->asSequence()->first().realSymbol.debug('real symbol');--DEBUG
+			
+			arg.realSymbol <- targetExp.arguments->asSequence()->first().realSymbol;
+
+			-- s <- t + c => s - c <- t			
+			if(targetExp.operationName = '+'){
+				op.operationName <- '-';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- t - c => s + c <- t						
+			if(targetExp.operationName = '-'){
+				op.operationName <- '+';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};				
+			}
+			-- s <- t * c => s / c <- t									
+			if(targetExp.operationName = '*'){
+				op.operationName <- '/';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- t / c => s * c <- t												
+			if(targetExp.operationName = '/'){
+				op.operationName <- '*';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};				
+			}		
+			
+			thisModule.RBinding(op, targetExp.source, r);								
+		} 
+		else
+		-- First argument of an operator is a real expression.			
+		if(targetExp.source.oclIsKindOf(ATL!RealExp)){
+			targetExp.source.realSymbol.debug('real symbol');--DEBUG
+
+			arg.realSymbol <- targetExp.source.realSymbol;
+
+			-- s <- c + t => s - c <- t						
+			if(targetExp.operationName = '+'){
+				op.operationName <- '-';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- c - t => c - s <- t									
+			if(targetExp.operationName = '-'){
+				op.operationName <- '-';
+				op.source <- arg;
+				op.arguments <- Sequence{sourceExp};				
+			}		
+			-- s <- c * t => s / c <- t												
+			if(targetExp.operationName = '*'){
+				op.operationName <- '/';
+				op.source <- sourceExp;
+				op.arguments <- Sequence{arg};
+			}
+			-- s <- c / t => s / c <- t															
+			if(targetExp.operationName = '/'){
+				op.operationName <- '/';
+				op.source <- arg;
+				op.arguments <- Sequence{sourceExp};				
+			}			
+			
+			thisModule.RBinding(op, targetExp.arguments->asSequence()->first(), r);								
+		}				
+	}	
+}
+
+-- Reverse boolean 'not' operator.
+-- s <- not t => not s <- t
+lazy rule RBooleanNotOperator{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!OperatorCallExp, 
+		r: ATL!MatchedRule
+	to notExp: ATL!OperatorCallExp(
+		operationName <- 'not',
+		source <- sourceExp
+	)
+	do{
+		thisModule.RBinding(notExp, targetExp.source, r);
+	}
+}
+
+-- Reverse operation call.
+rule ROperationCall(sourceExp: ATL!PropertyCallExp, targetExp: ATL!OperationCallExp, r: ATL!MatchedRule){
+	do{
+		targetExp.operationName.debug('Operation name');--DEBUG
+		
+		-- 'resolveTemp' operation is skipped
+		if(targetExp.operationName = 'resolveTemp'){
+			thisModule.RBinding(sourceExp, targetExp.arguments->asSequence()->first(), r);
+		}
+		else
+		-- Unary operation 
+		if(targetExp.arguments->size() = 0){
+			thisModule.RUnaryOperation(sourceExp, targetExp, r);
+		}
+	}
+}
+
+-- Reverse unary operation call.
+lazy rule RUnaryOperation{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!OperationCallExp, 
+		r: ATL!MatchedRule
+	to op: ATL!OperationCallExp(
+		source <- sourceExp
+	)
+	do{
+		
+		-- s <- t.exp() => s.log() <- t
+		if(targetExp.operationName = 'exp'){
+			op.operationName <- 'log';
+		}
+		else
+		-- s <- t.log() => s.exp() <- t			
+		if(targetExp.operationName = 'log'){
+			op.operationName <- 'exp';
+		}
+		else
+		-- s <- t.toDegrees() => s.toDegrees() <- t						
+		if(targetExp.operationName = 'toDegrees'){
+			op.operationName <- 'toDegrees';
+		}
+		else
+		-- s <- t.toRadians() => s.toDegrees() <- t									
+		if(targetExp.operationName = 'toRadians'){
+			op.operationName <- 'toDegrees';
+		}
+		else
+		-- s <- t.toInteger() => s.toString <- t												
+		if(targetExp.operationName = 'toInteger'){
+			op.operationName <- 'toString';
+		}
+		else
+		-- s <- t.toReal() => s.toString <- t															
+		if(targetExp.operationName = 'toReal'){
+			op.operationName <- 'toString';
+		}
+		
+		thisModule.RBinding(op, targetExp.source, r);		
+	}
+}
+
+-- Reverse collection operation call.
+rule RCollectionOperationCall(sourceExp: ATL!PropertyCallExp, targetExp: ATL!CollectionOperationCallExp, r: ATL!MatchedRule){
+	do{
+		targetExp.operationName.debug('Collection operation name');--DEBUG
+		
+		-- Append
+		if(targetExp.operationName = 'append'){
+			thisModule.RAppend(sourceExp, targetExp, r);
+		}
+	}
+}
+
+-- Append collection operation reverse.
+lazy rule RAppend{
+	from sourceExp: ATL!PropertyCallExp, 
+		targetExp: ATL!CollectionOperationCallExp, 
+		r: ATL!MatchedRule
+	to op: ATL!CollectionOperationCallExp,
+		letExp: ATL!LetExp(
+			variable <- letVar,
+			in_ <- op
+		),
+		letVar: ATL!VariableDeclaration(
+			varName <- 'seq',
+			type <- sequenceType,
+			initExpression <- sourceExp
+		),
+		sequenceType: ATL!SequenceType(
+			elementType <- sequenceElementType
+		),
+		sequenceElementType: ATL!OclAnyType,		
+		subSequenceSource: ATL!VariableExp(
+			referredVariable <- letVar
+		),
+		oneExp1: ATL!IntegerExp(
+			integerSymbol <- 1
+		),
+		oneExp2: ATL!IntegerExp(
+			integerSymbol <- 1
+		),
+		minusExp: ATL!OperatorCallExp(
+			operationName <- '-',
+			source <- seqSizeExp,
+			arguments <- Sequence{oneExp2}
+		),				
+		seqSizeExp: ATL!CollectionOperationCallExp(
+			operationName <- 'size', 
+			source <- seqSizeExpSource
+		),
+		seqSizeExpSource: ATL!VariableExp(
+			referredVariable <- letVar
+		)
+		do{
+		if(targetExp.arguments->size() > 0){
+			-- Reverse looks as follows:
+			-- s <- e.append(t) => s->last() <- t
+			if(targetExp.arguments->first().containsInPatternElement){
+				op.operationName <- 'last';
+				op.source <- sourceExp;
+				
+				thisModule.RBinding(op, targetExp.arguments->first(), r);
+			}
+			else
+			-- Reverse looks as follows:				
+			-- s <- t.append(e) => let seq: Sequence = s in seq->subSequence(1, seq->size()-1) <- t
+			if(targetExp.source.containsInPatternElement){
+				op.operationName <- 'subSequence';
+				op.source <- subSequenceSource;
+				op.arguments <- Sequence{oneExp1, minusExp};
+				
+				thisModule.RBinding(letExp, targetExp.source, r);				
+			}						
+		}		
+	}
+}
+
+-----------------------------------------------------------------------------------------
+-- Statement reverse rules.
+-----------------------------------------------------------------------------------------
+
+-- Initial step for statement reverse.
+rule RStatement(inst: ATL!Statement, r: ATL!MatchedRule){
+	do{
+		
+		r.name.debug('Reverse statements of the rule');--DEBUG
+		
+		-- Every statement from both 'then' end 'else' clauses is reversed.
+		if(inst.oclIsKindOf(ATL!IfStat)){
+			for(st in inst.thenStatements){
+				thisModule.RStatement(st, r);
+			}			
+			for(st in inst.elseStatements){
+				thisModule.RStatement(st, r);
+			}
+		}
+		else
+		-- Binding statement.
+		if(inst.oclIsKindOf(ATL!BindingStat)){
+			-- Head of the statement has to be a simple feature call like 'v.f'.						
+			if(inst.source.oclIsKindOf(ATL!NavigationOrAttributeCallExp)){
+				if(inst.source.source.oclIsKindOf(ATL!VariableExp)){
+					thisModule.RBindingStatementInit(inst, r);
+				}
+			}
+		}
+	}
+}
+
+lazy rule RBindingStatementInit{
+	from inst: ATL!Statement, 
+		r: ATL!MatchedRule
+	to 	featureCall: ATL!NavigationOrAttributeCallExp(
+			name <- inst.source.name,
+			source <- varExp
+		),
+		varExp: ATL!VariableExp
+	do{
+
+		varExp.referredVariable <- thisModule.resolveTemp(inst.source.source.referredVariable, 'ipelm');
+
+		-- 'targetExp' is a path in target model.
+		-- Statement is reversed into 'from' condition (filter) of a rule.
+		if(not inst.value.containsInPatternElement){
+			if(inst.source.oclIsKindOf(ATL!NavigationOrAttributeCallExp))
+			if(inst.source.source.oclIsKindOf(ATL!VariableExp))
+			{
+				thisModule.RConstantBinding(inst.source.name, inst.source.source.referredVariable, inst.value, r);
+			}			
+		}
+		else
+		-- Forward target feature is of a class type, 'resolveTemp' call is required
+		-- for implicit call of the class matching rule.
+		if(MOF!EStructuralFeature.allInstancesFrom('TARGET')->
+				any(e | e.name = inst.source.name).eType.oclIsKindOf(MOF!EClass)){
+			
+			-- Forward target feature is one-to-one association, simple 'resolveTemp' call is required.
+			if(MOF!EStructuralFeature.allInstancesFrom('TARGET')->
+					any(e | e.name = inst.source.name).upperBound = 1){
+				thisModule.RBindingStatement(
+					thisModule.CResolveTempCall(inst.value.getDeepestSourceFeatureName, featureCall), inst.value, r);
+			}
+			-- Forward target feature is one-to-many association, 
+			-- 		collect(e, thisModule.resolveTemp(e, 'elm'))
+			-- call is required.
+			else{
+				thisModule.RBindingStatement(thisModule.CCollectResolveTempCall(
+					inst.value.getDeepestSourceFeatureName, featureCall), inst.value, r);
+			}
+		}
+		-- Forward target feature is not of a class type, 'resolveTemp' call is not required.
+		else{
+			thisModule.RBindingStatement(featureCall, inst.value, r);
+		}															
+	}
+}
+
+-- Reverse of a binding statement.
+rule RBindingStatement(sourceExp: ATL!PropertyCallExp, targetExp: ATL!OclExpression, r: ATL!MatchedRule){
+	do{
+		
+		if(not(targetExp.oclIsUndefined())){
+		
+			-- If targetExp is a feature call, create new statement		
+			if(targetExp.oclIsKindOf(ATL!NavigationOrAttributeCallExp)){
+				thisModule.CBindingStatement(sourceExp, targetExp, r);	
+			}
+			else
+			-- Iterator expression reverse				
+			if(targetExp.oclIsKindOf(ATL!IteratorExp)){
+				thisModule.RIteratorExpInitInStatement(sourceExp, targetExp, r);
+			}
+			else
+			-- Operator Call reverse
+			if(targetExp.oclIsKindOf(ATL!OperatorCallExp)){
+				thisModule.ROperatorCall(sourceExp, targetExp, r);	
+			}
+			else
+			-- Collection Operation Call reverse
+			if(targetExp.oclIsKindOf(ATL!CollectionOperationCallExp)){
+				thisModule.RCollectionOperationCall(sourceExp, targetExp, r);
+			}			
+			else
+			-- Operation Call reverse
+			if(targetExp.oclIsKindOf(ATL!OperationCallExp)){
+				thisModule.ROperationCall(sourceExp, targetExp, r);	
+			}
+			else
+			-- if-then-else-endif reverse
+			if(targetExp.oclIsKindOf(ATL!IfExp)){
+				if(targetExp.thenExpression.containsInPatternElement){
+					thisModule.RBinding(sourceExp, targetExp.thenExpression, r);
+				}
+				else 
+				if(targetExp.elseExpression.containsInPatternElement){
+					thisModule.RBinding(sourceExp, targetExp.elseExpression, r);
+				}
+			}
+		}
+	}
+}
+	
+-- Creation of a reverse binding statement on the basis of a binding statement.
+lazy rule CBindingStatement{
+	from sourceExp: ATL!PropertyCallExp,
+		targetExp: ATL!PropertyCallExp,
+		r: ATL!MatchedRule
+	to b: ATL!BindingStat,
+		featureCall: ATL!NavigationOrAttributeCallExp(
+			name <- targetExp.name,
+			source <- varExp
+		),
+		varExp: ATL!VariableExp
+	do{
+		
+		-- Add the binding statement to the rule.
+		r.actionBlock.statements <- r.actionBlock.statements->including(b);
+		
+		-- The end of the target path.
+		-- Target exp is a feature call and its source is a variable.
+		-- w.s <- v.f => f <- w.s
+		if(not(targetExp.source.oclIsUndefined()))
+		if(targetExp.source.oclIsKindOf(ATL!VariableExp))
+		if(not(targetExp.source.referredVariable.oclIsUndefined()))
+		if(targetExp.source.referredVariable.oclIsKindOf(ATL!SimpleInPatternElement)){
+			targetExp.name.debug('Reverse statement: target feature'); --DEBUG			
+			b.source <- featureCall;
+			b.value <- sourceExp;
+			varExp.referredVariable <- thisModule.resolveTemp(targetExp.source.referredVariable, 'opelm');
+		}
+
+		-- Middle of the target path.
+		-- Target exp is a feature call and its source is NOT a variable.		
+		-- Additional output pattern element is created.
+		-- s <- t.f => v.f <- s, v <- t
+		-- Here 'v' is a new output pattern element.
+		if(not(targetExp.source.oclIsUndefined()))
+		if(not(targetExp.source.oclIsKindOf(ATL!VariableExp))){			
+			r.name.debug('rule');--DEBUG			
+			targetExp.name.debug('Reverse statement: target feature in the middle'); --DEBUG			
+			b.source <- featureCall;
+			b.value <- sourceExp;
+			
+			''.debug('Before source type calc');--DEBUG
+			targetExp.sourceType('SOURCE').name.debug('Source type');--DEBUG			
+			-- add new OutPatternElement to the rule			
+			varExp.referredVariable <- thisModule.RBindingPathElement(targetExp.sourceType('SOURCE'), targetExp.source, r);
+		}			
+	}
+}
+
+-- Checking preconditions for the reverse of an iterator expression in a statement into a statement.
+rule RIteratorExpInitInStatement(sourceExp: ATL!PropertyCallExp, targetExp: ATL!IteratorExp, r: ATL!MatchedRule){
+	do{
+		-- Reverse is provided for 'any' and 'select' iterative expressions.
+		if(targetExp.name = 'any' or targetExp.name = 'select'){
+			if(not targetExp.source.oclIsUndefined()){
+				-- Source of an iterative expression should be a feature call.
+				if(targetExp.source.oclIsKindOf(ATL!NavigationOrAttributeCallExp)){			
+					thisModule.RIteratorExp(sourceExp, targetExp, r);
+				}
+			}			
+		}
+		else
+		-- 'collect' is skipped.
+		if(targetExp.name = 'collect'){
+			thisModule.RBindingStatement(sourceExp, targetExp.source, r);
+		}
+	}
+}
+
+------------------------------------------------------------------------------
+-- Rules for ATL!OclExpression copy.
+------------------------------------------------------------------------------
+
+-- Stub for the rule from 'ATLCopy' library.
+--lazy rule CopyOclExpression{
+--	from inexp: ATL!OclExpression
+--	to outexp: ATL!StringExp(
+--		stringSymbol <- 'Undefined'
+--	)
+--}
+
+rule CopyOclExpression(inexp: ATL!OclExpression){
+	do{
+		
+		-- This string is added to force 'CopyOclExpression' and its assignment of binding to work properly
+		thisModule.bufferExp <- thisModule.undefinedModelElement;			
+
+		if(inexp.oclIsKindOf(ATL!OclModelElement)){
+			thisModule.bufferExp <- thisModule.resolveTemp(inexp, 'outelm');
+		}
+		if(inexp.oclIsKindOf(ATL!VariableExp)){
+			thisModule.bufferExp <- thisModule.CopyVariableExp(inexp);
+		}
+
+		if(inexp.oclIsKindOf(ATL!StringExp)){
+			thisModule.bufferExp <- thisModule.CopyStringExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!BooleanExp)){
+			thisModule.bufferExp <- thisModule.CopyBooleanExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!RealExp)){
+			thisModule.bufferExp <- thisModule.CopyRealExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!IntegerExp)){
+			thisModule.bufferExp <- thisModule.CopyIntegerExp(inexp);
+		}
+
+		if(inexp.oclIsKindOf(ATL!SetExp)){
+			thisModule.bufferExp <- thisModule.CopySetExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!OrderedSetExp)){
+			thisModule.bufferExp <- thisModule.CopyOrderedSetExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!BagExp)){
+			thisModule.bufferExp <- thisModule.CopyBagExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!SequenceExp)){
+			thisModule.bufferExp <- thisModule.CopySequenceExp(inexp);
+		}
+
+		if(inexp.oclIsKindOf(ATL!LetExp)){
+			thisModule.bufferExp <- thisModule.CopyLetExp(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!IfExp)){
+			thisModule.bufferExp <- thisModule.CopyIfExp(inexp);
+		}
+
+		if(inexp.oclIsKindOf(ATL!NavigationOrAttributeCallExp)){
+			thisModule.bufferExp <- thisModule.CopyNavigationOrAttributeCallExp(inexp);
+		}
+
+		if(inexp.oclIsKindOf(ATL!IteratorExp)){
+			thisModule.bufferExp <- thisModule.CopyIteratorExp(inexp);
+		}
+
+		
+		if(inexp.oclIsKindOf(ATL!StringType)){
+			thisModule.bufferExp <- thisModule.CopyStringType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!BooleanType)){
+			thisModule.bufferExp <- thisModule.CopyBooleanType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!IntegerType)){
+			thisModule.bufferExp <- thisModule.CopyIntegerType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!RealType)){
+			thisModule.bufferExp <- thisModule.CopyRealType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!SetType)){
+			thisModule.bufferExp <- thisModule.CopySetType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!OrderedSetType)){
+			thisModule.bufferExp <- thisModule.CopyOrderedSetType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!BagType)){
+			thisModule.bufferExp <- thisModule.CopyBagType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!SequenceType)){
+			thisModule.bufferExp <- thisModule.CopySequenceType(inexp);
+		}
+		if(inexp.oclIsKindOf(ATL!OclAnyType)){
+			thisModule.bufferExp <- thisModule.CopyOclAnyType(inexp);
+		}		
+		
+		if(inexp.oclIsKindOf(ATL!OperatorCallExp)){
+			thisModule.bufferExp <- thisModule.CopyOperatorCallExp(inexp);
+		}
+		else
+		if(inexp.oclIsKindOf(ATL!CollectionOperationCallExp)){
+			thisModule.bufferExp <- thisModule.CopyCollectionOperationCallExp(inexp);
+		}
+		else
+		if(inexp.oclIsKindOf(ATL!OperationCallExp)){
+			thisModule.bufferExp <- thisModule.CopyOperationCallExp(inexp);
+		}
+		
+	}
+}
+
+
+lazy rule CopyVariableExp{
+	from inexp: ATL!VariableExp
+	to outexp: ATL!VariableExp(
+		name <- inexp.name,
+		referredVariable <- thisModule.CopyVariableDeclaration(inexp.referredVariable)
+	)
+	do{
+		if(not inexp.type.oclIsUndefined()){
+			if(inexp.type.oclIsKindOf(ATL!OclModelElement)){
+				outexp.type <- thisModule.resolveTemp(inexp.type, 'outelm');
+			}
+			else{				
+				thisModule.CopyOclExpression(inexp.type);
+				outexp.type <- thisModule.bufferExp;
+			}
+		}		
+	}
+}
+
+lazy rule CopyStringExp{
+	from inexp: ATL!StringExp
+	to outexp: ATL!StringExp(
+		stringSymbol <- inexp.stringSymbol
+	)
+}
+
+lazy rule CopyBooleanExp {
+	from inexp: ATL!BooleanExp
+	to outexp: ATL!BooleanExp(
+		booleanSymbol <- inexp.booleanSymbol
+	)
+}
+
+lazy rule CopyRealExp{
+	from inexp: ATL!RealExp
+	to outexp: ATL!RealExp(
+		realSymbol <- inexp.realSymbol
+	)
+}
+
+lazy rule CopyIntegerExp{
+	from inexp: ATL!IntegerExp
+	to outexp: ATL!IntegerExp(
+		integerSymbol <- inexp.integerSymbol
+	)
+}
+
+lazy rule CopySetExp{
+	from inexp: ATL!SetExp
+	to outexp: ATL!SetExp
+	do{
+		for(e in inexp.elements){
+			thisModule.CopyOclExpression(e);
+			outexp.elements <- outexp.elements->asSequence()->append(thisModule.bufferExp);
+		}
+	}
+}
+
+lazy rule CopyOrderedSetExp{
+	from inexp: ATL!OrderedSetExp
+	to outexp: ATL!OrderedSetExp
+	do{
+		for(e in inexp.elements){
+			thisModule.CopyOclExpression(e);
+			outexp.elements <- outexp.elements->asSequence()->append(thisModule.bufferExp);
+		}
+	}
+}
+
+lazy rule CopyBagExp{
+	from inexp: ATL!BagExp
+	to outexp: ATL!BagExp
+	do{
+		for(e in inexp.elements){
+			thisModule.CopyOclExpression(e);
+			outexp.elements <- outexp.elements->asSequence()->append(thisModule.bufferExp);
+		}
+	}
+}
+
+lazy rule CopySequenceExp{
+	from inexp: ATL!SequenceExp
+	to outexp: ATL!SequenceExp
+	do{
+		for(e in inexp.elements){
+			thisModule.CopyOclExpression(e);
+			outexp.elements <- outexp.elements->asSequence()->append(thisModule.bufferExp);
+		}
+	}
+}
+
+lazy rule CopyLetExp{
+	from inexp: ATL!LetExp
+	to outexp: ATL!LetExp(
+		variable <- thisModule.CopyVariableDeclaration(inexp.variable)		
+	)
+	do{
+		thisModule.CopyOclExpression(inexp.in_);
+		outexp.in_ <- thisModule.bufferExp;
+	}
+}
+
+lazy rule CopyIfExp{
+	from inexp: ATL!IfExp
+	to outexp: ATL!IfExp
+	do{
+		thisModule.CopyOclExpression(inexp.thenExpression);
+		outexp.thenExpression <- thisModule.bufferExp;
+		
+		thisModule.CopyOclExpression(inexp.elseExpression);
+		outexp.elseExpression <- thisModule.bufferExp;
+		
+		thisModule.CopyOclExpression(inexp.condition);
+		outexp.condition <- thisModule.bufferExp;
+	}
+}
+
+
+lazy rule CopyNavigationOrAttributeCallExp{
+	from inexp: ATL!NavigationOrAttributeCallExp
+	to outexp: ATL!NavigationOrAttributeCallExp(
+		name <- inexp.name		
+	)
+	do{
+		thisModule.CopyOclExpression(inexp.source);
+		outexp.source <- thisModule.bufferExp;
+	}
+}
+
+lazy rule CopyOperationCallExp{
+	from inexp: ATL!OperationCallExp
+	to outexp: ATL!OperationCallExp(
+		operationName <- inexp.operationName
+	)
+	do{
+		thisModule.CopyOclExpression(inexp.source);
+		outexp.source <- thisModule.bufferExp;
+
+		for(e in inexp.arguments){
+			thisModule.CopyOclExpression(e);
+			outexp.arguments <- outexp.arguments->asSequence()->append(thisModule.bufferExp);
+		}		
+	}
+}
+
+lazy rule CopyCollectionOperationCallExp{
+	from inexp: ATL!CollectionOperationCallExp
+	to outexp: ATL!CollectionOperationCallExp(
+		operationName <- inexp.operationName
+	)
+	do{
+		thisModule.CopyOclExpression(inexp.source);
+		outexp.source <- thisModule.bufferExp;
+
+		for(e in inexp.arguments){
+			thisModule.CopyOclExpression(e);
+			outexp.arguments <- outexp.arguments->asSequence()->append(thisModule.bufferExp);
+		}		
+	}
+}
+
+lazy rule CopyOperatorCallExp{
+	from inexp: ATL!OperatorCallExp
+	to outexp: ATL!OperatorCallExp(
+		operationName <- inexp.operationName
+	)
+	do{
+		thisModule.CopyOclExpression(inexp.source);
+		outexp.source <- thisModule.bufferExp;
+
+		for(e in inexp.arguments){
+			thisModule.CopyOclExpression(e);
+			outexp.arguments <- outexp.arguments->asSequence()->append(thisModule.bufferExp);
+		}				
+	}
+}
+
+lazy rule CopyIteratorExp{
+	from inexp: ATL!IteratorExp
+	to outexp: ATL!IteratorExp(
+		name <- inexp.name,		
+		iterators <- inexp.iterators->collect(e | thisModule.CopyIterator(e))
+	)
+	do{		
+		thisModule.CopyOclExpression(inexp.body);
+		outexp.body <- thisModule.bufferExp;
+
+		thisModule.CopyOclExpression(inexp.source);
+		outexp.source <- thisModule.bufferExp;
+	}
+}
+
+------------------------------------------------------------------------------
+-- Rules for ATL!OclType copy.
+------------------------------------------------------------------------------
+
+lazy rule CopyStringType{
+	from intype: ATL!StringType
+	to outtype: ATL!StringType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopyBooleanType{
+	from intype: ATL!BooleanType
+	to outtype: ATL!BooleanType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopyIntegerType{
+	from intype: ATL!IntegerType
+	to outtype: ATL!IntegerType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopyRealType{
+	from intype: ATL!RealType
+	to outtype: ATL!RealType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopyBagType{
+	from intype: ATL!BagType
+	to outtype: ATL!BagType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopyOrderedSetType{
+	from intype: ATL!OrderedSetType
+	to outtype: ATL!OrderedSetType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopySetType{
+	from intype: ATL!SetType
+	to outtype: ATL!SetType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopySequenceType{
+	from intype: ATL!SequenceType
+	to outtype: ATL!SequenceType(
+		name <- intype.name
+	)
+}
+
+lazy rule CopyOclAnyType{
+	from intype: ATL!OclAnyType
+	to outtype: ATL!OclAnyType(
+		name <- intype.name
+	)
+}
+
+------------------------------------------------------------------------------
+-- Rules for ATL!VariableDeclaration copy.
+------------------------------------------------------------------------------
+
+lazy rule CopyVariableDeclaration{
+	from invar: ATL!VariableDeclaration
+	to outvar: ATL!VariableDeclaration(
+		varName <- invar.varName		
+	)
+	do{		
+		if(not invar.type.oclIsUndefined()){
+			thisModule.CopyOclExpression(invar.type);
+			outvar.type <- thisModule.bufferExp;
+		}	
+		
+		if(not invar.initExpression.oclIsUndefined()){
+			thisModule.CopyOclExpression(invar.initExpression);
+			outvar.initExpression <- thisModule.bufferExp;
+		}
+	}
+}
+
+lazy rule CopyIterator{
+	from invar: ATL!Iterator
+	to outvar: ATL!Iterator(
+		varName <- invar.varName
+	)
+	do{
+		if(not invar.type.oclIsUndefined()){
+			thisModule.CopyOclExpression(invar.type);
+			outvar.type <- thisModule.bufferExp;
+		}	
+		
+		if(not invar.initExpression.oclIsUndefined()){
+			thisModule.CopyOclExpression(invar.initExpression);
+			outvar.initExpression <- thisModule.bufferExp;
+		}
+	}
+}
+
+
+
+------------------------------------------------------------------------------
+-- HELPERS
+------------------------------------------------------------------------------
+
+helper def: atlCompilerVersion: String = '-- @atlcompiler atl2006';
+
+-- Simple reverse rule name based on name.
+-- If a name looks like A2B return B2A, otherwise add 'Reverse' to the end of 
+-- the name.
+helper context String def: reverseRuleName: String =
+	let pos: Integer = self.indexOf('2') in
+	if pos < 2 then self + 'Reverse' else
+		self.substring(pos+2, self.size()) + '2' + self.substring(1, pos)
+	endif;
+
+-- Reverse rule name based on in and out patterns.
+helper context ATL!MatchedRule def: reverseRuleName: String =
+	let opname: String = self.outPattern.elements->asSequence()->first().type.name in
+	let ipname: String = self.inPattern.elements->asSequence()->first().type.name in
+	opname + '2' +	ipname;
+
+-- Get a start string number x from a location.
+-- Location is a string looking like x:y-z:w
+helper def: locationStartString(l: String): Integer =
+	if l.oclIsUndefined() or l = '' then 0 else
+		if l = '' then 0 else 
+			let i: Integer = l.indexOf(':') in
+				if i < 2  then 0 
+				else l.substring(1, i-1).toInteger() 
+				endif
+		endif
+	endif;
+
+-- Get a start character number y from a location x:y-z:w.
+helper def: locationStartChar(l: String): Integer =
+	if l.oclIsUndefined() or l = '' then 0 else
+	if l = '' then 0 else 
+		let i: Integer = l.indexOf(':') in
+		let j: Integer = l.indexOf('-') in
+			if i = 0 then 0 else 
+			if j = 0 then 0 else
+			if i >= j-2 then 0 
+			else l.substring(i+1, j-1).toInteger() 
+			endif
+			endif
+			endif
+	endif
+	endif;
+
+-- Return true if this element is located before elm one 
+-- in a text of ATL transformation.
+helper def: before(elm1: ATL!Element, elm2: ATL!Element): Boolean =
+	let x1: Integer = thisModule.locationStartString(elm1) in
+	let y1: Integer = thisModule.locationStartChar(elm1) in
+	let x2: Integer = thisModule.locationStartString(elm2) in
+	let y2: Integer = thisModule.locationStartChar(elm2) in
+	if x1 < x2 then true else
+		if x1 > x2 then false else 
+			if y1 < y2 then true else false endif
+		endif 
+	endif;
+
+-- Return default (first) element of a target (out) pattern
+helper context ATL!OutPattern def: defaultElement: ATL!OutPatternElement =
+	self.elements()->iterate(e; res: ATL!OutPatternElement = self.elements()->any() | 	
+		if thisModule.before(e, res) then e else res endif);			
+
+-- Create variable name from some name (e.g. from classifier name)
+helper context String def: variableName: String =
+	'a' + self.toLower();
+
+
+-- Going though path expression of the source model elements
+-- to find a source type of a feature.
+-- 'metamodelVarName' can be 'SOURCE' or 'TARGET'
+helper context ATL!PropertyCallExp def: sourceType(metamodelVarName: String) : ATL!OclModelElement =
+	if not(self.source.oclIsUndefined()) then
+		if self.source.oclIsKindOf(ATL!NavigationOrAttributeCallExp) then
+			MOF!EStructuralFeature.allInstancesFrom(metamodelVarName)->any(e | e.name = self.source.name).eType
+		else
+			if self.source.oclIsKindOf(ATL!PropertyCallExp) then
+				self.source.sourceType(metamodelVarName)
+			else thisModule.undefinedModelElement
+			endif
+		endif
+	else thisModule.undefinedModelElement
+	endif;
+
+-- Check whether an expression contains an in pattern element.
+helper context ATL!OclExpression def: containsInPatternElement: Boolean =
+	if self.oclIsUndefined() then false
+	else
+		-- VariableExp
+		if self.oclIsKindOf(ATL!VariableExp) then 
+			if self.referredVariable.oclIsUndefined() then false 
+			else
+				if self.referredVariable.oclIsKindOf(ATL!InPatternElement) then true
+				else false
+				endif
+			endif
+		else
+			-- NavigationOrAttributeCallExp
+			if self.oclIsKindOf(ATL!NavigationOrAttributeCallExp) then 
+				self.source.containsInPatternElement
+			else
+				-- IteratorExp
+				if self.oclIsKindOf(ATL!IteratorExp) then 
+					self.source.containsInPatternElement
+				else
+					-- OperationCallExp			
+					if self.oclIsKindOf(ATL!OperationCallExp) then
+						self.source.containsInPatternElement or
+						self.arguments->iterate(e; res: Boolean = false | e.containsInPatternElement or res)
+					-- The rest expressions
+					else
+						-- IfExp
+						if self.oclIsKindOf(ATL!IfExp) then
+							self.thenExpression.containsInPatternElement or
+							self.elseExpression.containsInPatternElement 
+						else
+							-- LetExp
+							if self.oclIsKindOf(ATL!LetExp) then
+								self.in_.containsInPatternElement
+							else
+								-- CollectionExp
+								if self.oclIsKindOf(ATL!CollectionExp) then
+									self.elements->iterate(e; res: Boolean = false | e.containsInPatternElement or res)								
+								else
+									false
+								endif
+							endif
+						endif
+					endif
+				endif
+			endif
+		endif
+	endif;
+
+-- Get deepest source feature name from expression.
+-- This feature has to be applied to in pattern element.
+-- Valid expression have to have only one such feature call.
+-- Helper summarize all names of such features:
+-- If an expression contains several deepest feature calls,
+-- the result will be odd.
+helper context ATL!OclExpression def: getDeepestSourceFeatureName: String =
+	if self.oclIsUndefined() then 
+		''
+	else
+		-- VariableExp
+		if self.oclIsKindOf(ATL!VariableExp) then 
+			if self.referredVariable.oclIsUndefined() then
+				''
+			else
+				if self.referredVariable.oclIsKindOf(ATL!InPatternElement) then
+					self.appliedProperty.name
+				else 
+					''
+				endif
+			endif
+		else
+			-- NavigationOrAttributeCallExp
+			if self.oclIsKindOf(ATL!NavigationOrAttributeCallExp) then 
+				self.source.getDeepestSourceFeatureName
+			else
+				-- IteratorExp
+				if self.oclIsKindOf(ATL!IteratorExp) then 
+					self.source.getDeepestSourceFeatureName
+				else
+					-- OperationCallExp			
+					if self.oclIsKindOf(ATL!OperationCallExp) then
+						self.source.getDeepestSourceFeatureName +
+						self.arguments->iterate(e; res: String = '' | e.getDeepestSourceFeatureName + res)
+					-- The rest expressions
+					else
+						-- IfExp
+						if self.oclIsKindOf(ATL!IfExp) then
+							self.thenExpression.getDeepestSourceFeatureName +
+							self.elseExpression.getDeepestSourceFeatureName 
+						else 
+							''
+						endif
+					endif
+				endif
+			endif
+		endif
+	endif;
+
+-- Check whether a class named 'self' is a subclass of class named 'clName' in metamodel 'metamodelVarName'.
+-- 'metamodelVarName' can be 'SOURCE' or 'TARGET'
+helper context String def: isSubclassOf(clName: String, metamodelVarName: String): Boolean =
+	let selfClass: MOF!EClass = MOF!EClass.allInstancesFrom(metamodelVarName)->any(e | e.name = self) in
+	let clNameClass: MOF!EClass = MOF!EClass.allInstancesFrom(metamodelVarName)->any(e | e.name = clName) in
+	if self = clName or selfClass.eAllSuperTypes->includes(clNameClass) then true 
+	else false
+	endif;

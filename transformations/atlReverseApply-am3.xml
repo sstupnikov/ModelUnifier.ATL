@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="Atl Reverse Application" default="all">
+
+	<property name="metamodelPath" value="Metamodels/" />
+	<property name="sourcePath" value="Transformations/" />
+	<property name="targetPath" value="Transformations/" />
+	<property name="transformationPath" value="Transformations/" />	
+
+	<property name="sourceFileName" value="OWL2SynthesisSimple" />	
+	
+	<property name="sourceName" value="OWL2Synthesis" />
+	<property name="targetName" value="Synthesis2OWL" />
+	<property name="transformationName" value="ATLReverse" />
+	<property name="sourceModelName" value="OWL" />
+	<property name="targetModelName" value="Synthesis" />
+	
+	<target name="all" depends="SAVEATL" />
+
+
+	<target name="LOADATL">
+		<am3.loadModel modelHandler="EMF" name="${sourceModelName}" metamodel="MOF" path="${metamodelPath}${sourceModelName}.ecore" />
+		<am3.loadModel modelHandler="EMF" name="${targetModelName}" metamodel="MOF" path="${metamodelPath}${targetModelName}.ecore" />		
+		<am3.loadModel modelHandler="EMF" name="ATL" metamodel="MOF" path="${metamodelPath}ATL-0.2.ecore" />
+		<am3.loadModel modelHandler="EMF" name="${sourceName}" metamodel="ATL" path="${sourcePath}${sourceFileName}.atl">
+			<injector name="ebnf">
+				<param name="name" value="ATL" />
+			</injector>
+		</am3.loadModel>
+		<am3.saveModel model="${sourceName}" path="${sourcePath}${sourceFileName}.ecore">
+		</am3.saveModel>
+	</target>
+
+	<target name="APPLYATL" depends="LOADATL" >		
+		<am3.atl path="${transformationPath}${transformationName}.atl">
+			<inModel name="SOURCE" model="${sourceModelName}" />
+			<inModel name="TARGET" model="${targetModelName}" />
+			<inModel name="IN" model="${sourceName}" />
+			<inModel name="MOF" model="%EMF" />
+			<inModel name="ATL" model="ATL" />
+			<outModel name="OUT" model="${targetName}" metamodel="ATL" />
+		</am3.atl>
+	</target>
+	
+	<target name="SAVEATL" depends="APPLYATL">
+		<am3.loadModel modelHandler="EMF" name="TCS" metamodel="MOF" path="${metamodelPath}TCS.ecore" />
+		<am3.loadModel modelHandler="EMF" name="ATL-TCS" metamodel="TCS" path="${metamodelPath}ATL-0.2-TCS.ecore" />
+		<am3.saveModel model="${targetName}" path="${targetPath}${targetName}.atl">
+			<extractor name="ebnf">
+	        	<param name="format" value="ATL-TCS"/>
+				<param name="indentString" value="    "/>
+				<param name="serializeComments" value="true"/>
+			</extractor>
+		</am3.saveModel>
+		<am3.saveModel model="${targetName}" path="${targetPath}${targetName}.ecore">
+		</am3.saveModel>	
+	</target>
+
+
+</project>

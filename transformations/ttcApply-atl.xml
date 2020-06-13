@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="Transfromation Template Constructor Application" default="all" basedir=".">
+
+	<property name="metamodelPath" value="Metamodels/" />
+	<property name="sourcePath" value="Samples/" />
+	<property name="targetPath" value="Transformations/" />
+	<property name="transformationPath" value="Transformations/" />	
+	
+	<property name="sourceName" value="OWL-Synthesis" />
+	<property name="targetName" value="OWL2SynthesisTemplate" />
+	<property name="transformationName" value="TTC" />
+
+
+	<target name="all" depends="SAVEATL" />
+
+
+	<target name="LOAD">
+		<atl.loadModel  name="ATL" metamodel="%EMF" path="${metamodelPath}ATL.ecore" />		
+		<atl.loadModel  name="Similarities" metamodel="%EMF" path="${metamodelPath}Similarities.ecore" />
+		<atl.loadModel  name="${sourceName}" metamodel="Similarities" path="${sourcePath}${sourceName}.ecore" />
+	</target>
+
+	<target name="APPLYATL" depends="LOAD" >		
+		<atl.launch path="${transformationPath}${transformationName}.asm">
+			<inModel name="IN" model="${sourceName}" />
+			<inModel name="Similarities" model="Similarities" /> 			
+			<inModel name="ATL" model="ATL" />			
+			<outModel name="OUT" model="${targetName}" metamodel="ATL" />
+		</atl.launch>
+	</target>
+	
+	<target name="SAVEATL" depends="APPLYATL">
+		<atl.loadModel name="ATL" metamodel="%EMF" path="${metamodelPath}ATL.ecore" />
+		<atl.saveModel model="${targetName}" path="${targetPath}${targetName}.ecore" />
+		<atl.saveModel model="${targetName}" path="${targetPath}${targetName}.atl">
+			<extractor name="ATL">
+				<param name="indentString" value=" "/>
+				<param name="serializeComments" value="false"/>
+			</extractor>
+		</atl.saveModel>
+			
+	</target>
+
+
+</project>

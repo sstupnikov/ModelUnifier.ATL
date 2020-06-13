@@ -1,0 +1,281 @@
+-- @atlcompiler atl2006
+module Synthesis2OWL;
+create OUT : OWL from IN : Synthesis;
+
+-- Matched Rule
+rule Schema2Graph {
+    from
+        s : Synthesis!SchemaDef,
+        owl : Synthesis!MetaclassDef,
+        ont : Synthesis!MetaclassDef,
+        onProp : Synthesis!MetaclassDef,
+        func : Synthesis!MetaclassDef,
+        invFunc : Synthesis!MetaclassDef,
+        trans : Synthesis!MetaclassDef,
+        symm : Synthesis!MetaclassDef
+        (
+            owl.name = 'owl' and ont.name = 'ontology' and onProp.name = 'onProperty' and func.name = 'functionalProperty' and invFunc.name = 'inverseFunctionalProperty' and trans.name = 'transitiveProperty' and symm.name = 'symmetricProperty'
+        )
+    to
+        alocalname2 : OWL!LocalName (
+            name <- let str : String = s.name in
+            str.substring(1, str.size() - 6)
+        ),
+        aurireference2 : OWL!URIReference (
+            fragmentIdentifier <- alocalname2
+        ),
+        aowlontology1 : OWL!OWLOntology,
+        g : OWL!OWLGraph (
+            ontology <- s.modules->collect(e |
+                thisModule.resolveTemp(e, 'o')
+            )
+        )
+    do {
+        aowlontology1.uriRef <- aowlontology1.uriRef->including(aurireference2);
+        g.ontology <- g.ontology->including(aowlontology1);
+    }
+}
+
+-- Matched Rule
+rule Module2Ontology {
+    from
+        m : Synthesis!ModuleDef
+        (
+            m.classes = Set {Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'ontology'
+            )}
+        )
+    to
+        alocalname1 : OWL!LocalName (
+            name <- m.name
+        ),
+        aurireference1 : OWL!URIReference (
+            fragmentIdentifier <- alocalname1
+        ),
+        o : OWL!OWLOntology
+    do {
+        o.uriRef <- o.uriRef->including(aurireference1);
+        o.owlUniverse <- o.owlUniverse->union(m.containedTypes->collect(e |
+            thisModule.resolveTemp(e, 'r')
+        ));
+        o.owlUniverse <- o.owlUniverse->union(m.containedClasses->collect(e |
+            thisModule.resolveTemp(e, 'r')
+        ));
+    }
+}
+
+-- Matched Rule
+rule OWLClassReverse {
+    from
+        type : Synthesis!ADTDef,
+        class : Synthesis!ClassDef
+        (
+            class.instanceType = type and class.name = type.name.toLower() and type.classes = Set {Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'owl'
+            )} and class.classes = Set {Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'owl'
+            )}
+        )
+    to
+        alocalname3 : OWL!LocalName (
+            name <- type.name
+        ),
+        aurireference3 : OWL!URIReference (
+            fragmentIdentifier <- alocalname3
+        ),
+        c : OWL!OWLClass
+    do {
+        c.uriRef <- c.uriRef->including(aurireference3);
+        c.subClassOf <- c.subClassOf->union(type.supertypes->collect(e |
+            thisModule.resolveTemp(e, 'r')
+        ));
+        c.subClassOf <- c.subClassOf->union(class.superclasses->collect(e |
+            thisModule.resolveTemp(e, 'r')
+        ));
+    }
+}
+
+-- Matched Rule
+rule BuiltInType2Integer {
+    from
+        int : Synthesis!IntegerDef
+        (
+            int.name = 'integer' and int.unsigned = false
+        )
+    to
+        d : OWL!RDFSDataType (
+            getURI <- 'http://www.w3.org/2001/XMLSchema#integer'
+        )
+    do {
+        
+    }
+}
+
+-- Matched Rule
+rule BuiltInType2NonNegativeInteger {
+    from
+        int : Synthesis!IntegerDef
+        (
+            int.name = 'integer' and int.unsigned = true
+        )
+    to
+        d : OWL!RDFSDataType (
+            getURI <- 'http://www.w3.org/2001/XMLSchema#nonNegativeInteger'
+        )
+    do {
+        
+    }
+}
+
+-- Matched Rule
+rule BuiltInType2Positive {
+    from
+        int : Synthesis!IntegerDef
+        (
+            int.name = 'integer' and int.unsigned = true
+        )
+    to
+        d : OWL!RDFSDataType (
+            getURI <- 'http://www.w3.org/2001/XMLSchema#positiveInteger'
+        )
+    do {
+        
+    }
+}
+
+-- Matched Rule
+rule BuiltInType2String {
+    from
+        int : Synthesis!StringDef
+        (
+            int.name = 'string'
+        )
+    to
+        d : OWL!RDFSDataType (
+            getURI <- 'http://www.w3.org/2001/XMLSchema#string'
+        )
+    do {
+        
+    }
+}
+
+-- Matched Rule
+rule BuiltInType2Boolean {
+    from
+        bool : Synthesis!EnumDef,
+        t : Synthesis!StringValueDef,
+        f : Synthesis!StringValueDef
+        (
+            bool.values = Set {t, f} and bool.name = 'boolean' and t.value = 'true' and f.value = 'false'
+        )
+    to
+        d : OWL!RDFSDataType (
+            getURI <- 'http://www.w3.org/2001/XMLSchema#boolean'
+        )
+    do {
+        
+    }
+}
+
+-- Matched Rule
+rule Attribute2OWLDatatypeProperty {
+    from
+        a : Synthesis!AttributeDef,
+        f : Synthesis!FrameDef
+        (
+            a.metaslot = f and f.slots = Set {}
+        )
+    to
+        atypedliteral2 : OWL!TypedLiteral (
+            lexicalForm <- a.cardinality.toString()
+        ),
+        ardfsclass1 : OWL!RDFSClass (
+            OWLCardinality <- atypedliteral2
+        ),
+        ardfsclass2 : OWL!RDFSClass,
+        p : OWL!OWLDatatypeProperty
+    do {
+        p.domain <- p.domain->including(thisModule.resolveTemp(a.attributeOf, 'r'));
+        p.range <- p.range->including(thisModule.resolveTemp(a.type, 'r'));
+        ardfsclass2.subClassOf <- ardfsclass2.subClassOf->including(ardfsclass1);
+        p.domain <- p.domain->including(ardfsclass2);
+    }
+}
+
+-- Matched Rule
+rule OWLObjectPropertyReverse {
+    from
+        a : Synthesis!AttributeDef,
+        f : Synthesis!FrameDef,
+        assoc : Synthesis!AssociationMetaclassDef
+        (
+            a.metaslot = f and a.classes = Set {assoc} and assoc.maxCard = 0 - 1 and assoc.maxInverseCard = 0 - 1 and assoc.minCard = 0 and assoc.minInverseCard = 0 and f.slots = Set {} and assoc.classes = Set {Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'owl'
+            ), Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'onProperty'
+            )} and assoc.classInModule = a.attributeOf.typeInModule and assoc.classes = assoc.classes->including(Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'inverseFunctionalProperty'
+            )) and assoc.classes = assoc.classes->including(Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'symmetricProperty'
+            )) and assoc.classes = assoc.classes->including(Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'transitiveProperty'
+            )) and assoc.classes = assoc.classes->including(Synthesis!MetaclassDef.allInstances()->any(m |
+                m.name = 'functionalProperty'
+            ))
+        )
+    to
+        p : OWL!OWLObjectProperty (
+            OWLInverseOf <- thisModule.resolveTemp(a.inverseAttribute, 'p'),
+            OWLInverseOf <- thisModule.resolveTemp(assoc.inverse, 'p')
+        )
+    do {
+        p.domain <- p.domain->including(thisModule.resolveTemp(a.attributeOf, 'r'));
+        p.range <- p.range->including(thisModule.resolveTemp(a.type, 'r'));
+        p.domain <- p.domain->including(thisModule.resolveTemp(assoc.domain, 'r'));
+        p.domain <- p.domain->including(thisModule.resolveTemp(assoc.domain, 'r'));
+        p.range <- p.range->including(thisModule.resolveTemp(assoc.range, 'r'));
+        p.subPropertyOf <- p.subPropertyOf->union(assoc.superclasses->collect(e |
+            thisModule.resolveTemp(e, 'p')
+        ));
+    }
+}
+
+-- Matched Rule
+rule Slot2MinCardinalityRestriction {
+    from
+        s : Synthesis!SlotDef,
+        v : Synthesis!IntegerValueDef
+        (
+            s.name = 'min_card' and s.values = Set {v}
+        )
+    to
+        atypedliteral3 : OWL!TypedLiteral (
+            lexicalForm <- v.value.toString()
+        ),
+        r : OWL!MinCardinalityRestriction (
+            OWLMinCardinality <- atypedliteral3
+        )
+    do {
+        
+    }
+}
+
+-- Matched Rule
+rule Slot2MaxCardinalityRestriction {
+    from
+        s : Synthesis!SlotDef,
+        v : Synthesis!IntegerValueDef
+        (
+            s.name = 'max_card' and s.values = Set {v}
+        )
+    to
+        atypedliteral1 : OWL!TypedLiteral (
+            lexicalForm <- v.value.toString()
+        ),
+        r : OWL!MaxCardinalityRestriction (
+            OWLMaxCardinality <- atypedliteral1
+        )
+    do {
+        
+    }
+}

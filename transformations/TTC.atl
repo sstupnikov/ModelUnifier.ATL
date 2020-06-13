@@ -1,0 +1,638 @@
+-- @atlcompiler atl2006
+
+module TTC; -- Module Template
+create OUT: ATL from IN: Similarities;
+
+------------------------------------------------------------------------------
+-- VARIABLES FOR CODE VARIANTS
+------------------------------------------------------------------------------
+
+-- Name of the upper module. Name must be unique (to create one ATL module) in 'Module' rule.
+helper def: upperModuleName: String = 'Upper';
+
+helper def: atlCompilerVersion: String = '@atlcompiler atl2006';
+
+
+
+------------------------------------------------------------------------------
+-- RULES
+------------------------------------------------------------------------------
+
+entrypoint rule CheckSimilaritiesConsistency(){
+	do{
+		''.debug('CONSISTENCY CHECKING');
+		for (s in Similarities!Similarity.allInstances()){
+			if(s.oclIsUndefined() or s.name = '') 
+				''.debug('Undefined sim name.');
+			else 
+				s.name.debug('Sim');
+				
+			if(s.source.oclIsUndefined()) ''.debug('Undefined source of sim.');
+			else{
+				if(s.source.elements->size() = 1 and (not s.source.elements->first().oclIsKindOf(Similarities!Classifier)))
+					''.debug('Unique elements of source is not classifier.');
+
+				if(s.source.elements->size() > 1 and (not s.source.elements->last().oclIsKindOf(Similarities!StructuralFeature)))
+					''.debug('Last element of source is not feature.');				
+				
+				for(e in s.source.elements){
+					if(s.oclIsUndefined() or s.name = '') 
+						''.debug('Undefined element name.');
+					else
+						s.name.debug('Source Element');
+					
+					thisModule.CheckElementConsistency(e);			
+					
+					if(not(e = s.source.elements->first())){
+						if(e.oclIsKindOf(Similarities!Classifier) and
+							not(s.source.elements->at(s.source.elements->indexOf(e) - 1).oclIsKindOf(Similarities!StructuralFeature)))	
+							''.debug('Classifier is not preceded by feature.');
+					}
+			
+					if(not(e = s.source.elements->first())){
+						if(e.oclIsKindOf(Similarities!StructuralFeature) and  
+							not(s.source.elements->at(s.source.elements->indexOf(e) - 1).oclIsKindOf(Similarities!Classifier)))
+							''.debug('Feature is not preceded by classifier.');
+					}								
+				}			
+			}
+				
+			if(s.target.oclIsUndefined()) ''.debug('Undefined target of sim.');
+			else{
+									
+				if(s.target.elements->size() = 1 and (not s.target.elements->first().oclIsKindOf(Similarities!Classifier)))
+					''.debug('Unique elements of target is not classifier.');
+
+				if(s.target.elements->size() > 1 and (not s.target.elements->last().oclIsKindOf(Similarities!StructuralFeature)))
+					''.debug('Last element of target is not feature.');								
+				
+				for(e in s.target.elements){
+					if(s.oclIsUndefined() or s.name = '') 
+						''.debug('Undefined element name.');
+					else
+						s.name.debug('Target Element');
+					
+					thisModule.CheckElementConsistency(e);			
+										
+					if(not(e = s.target.elements->first())){
+						if(e.oclIsKindOf(Similarities!Classifier) and
+							not(s.target.elements->at(s.target.elements->indexOf(e)-1).oclIsKindOf(Similarities!StructuralFeature)))
+							' '.debug('Classifier is not preceded by feature.');
+					}
+
+					if(not(e = s.target.elements->first())){
+						if(e.oclIsKindOf(Similarities!StructuralFeature) and  
+							not(s.target.elements->at(s.target.elements->indexOf(e)-1).oclIsKindOf(Similarities!Classifier)))
+							''.debug('Feature is not preceded by classifier.');
+					}			
+					
+				}			
+			}
+		}
+		
+		''.debug('END CONSISTENCY CHECKING');
+	}
+}
+
+rule CheckElementConsistency(e: Similarities!NamedElement){
+	do{
+		if(not(e.oclIsKindOf(Similarities!Classifier) or e.oclIsKindOf(Similarities!StructuralFeature)))		
+			''.debug('Element is neither classifier nor feature.');								
+					
+		if(e.oclIsKindOf(Similarities!Classifier)){
+			if(e.ePackage.oclIsUndefined())
+				''.debug('ePackage in undefined.');
+		}
+				
+		if(e.oclIsKindOf(Similarities!TypedElement)){
+			if(e.eType.oclIsUndefined())
+				''.debug('eType in undefined.');
+		}
+
+		if(e.oclIsKindOf(Similarities!StructuralFeature)){
+			if(e.eContainingClass.oclIsUndefined())
+				''.debug('eContainingClass in undefined.');
+		}
+					
+		if(e.oclIsKindOf(Similarities!Reference)){
+			if(e.upperBound.oclIsUndefined())
+				''.debug('upperBound in undefined.');
+		}							
+	}
+}
+
+
+rule COclModel{
+	from p: Similarities!Package (not (p.name = thisModule.upperModuleName))	
+	to m: ATL!OclModel(
+		name <- p.name
+	)
+}
+
+-- ATL ecore specification requires for every entry of an OclModelElement to create 
+-- new instance of it
+lazy rule COclModelElement{
+	from cl: Similarities!Classifier
+	to elm: ATL!OclModelElement(
+		name <- cl.name, 
+		model <- cl.ePackage
+	)
+}
+
+rule CModule{
+	from p: Similarities!Package (p.name = thisModule.upperModuleName)	
+	using{
+		-- For each of these sims a matched rule is generated
+		ruleGenSims: Set(Similarities!Similarity) = Similarities!Similarity.allInstances()->
+			select(s | s.isClassSimilarity and s.sameSourceSims->select(s1 | s1.isClassSimilarity)->first() = s);
+	}
+	to 
+		m: ATL!Module(
+			name <- thisModule.sourceModelName + '2' + thisModule.targetModelName, 
+			commentsBefore <- Set{thisModule.atlCompilerVersion},
+			inModels <- Set{inModel},
+			outModels <- Set{outModel},
+			elements <- ruleGenSims->collect(s | thisModule.CMatchedRule(s))
+		),
+		-- IN model init
+		inModel: ATL!OclModel(name <- 'IN', metamodel <- thisModule.sourceModelPackage),
+		-- OUT model init
+		outModel: ATL!OclModel(name <- 'OUT', metamodel <- thisModule.targetModelPackage)	
+	do{	
+		-- DEBUG
+	}
+}
+
+unique lazy rule CMatchedRule{
+	-- Matched rule is created for correct class similarity.
+	-- One rule is created for all sims with the same target.
+	from sim: Similarities!Similarity(
+		sim.isClassSimilarity and 		
+		sim.sameSourceSims->select(s | s.isClassSimilarity)->first() = sim
+	)
+	using{
+		-- Target classes similar to source class of current sim
+		targetElements: Set(Similarities!NamedElement) =
+			sim.sameSourceSims->select(s | s.isClassSimilarity)->
+				collect(s | s.target.elements->first());
+	}
+	to arule: ATL!MatchedRule(
+			-- Rule name init	
+			name <- 
+				if targetElements->size() = 1 
+				then sim.firstSourceElementName + '2' + sim.firstTargetElementName
+				else sim.firstSourceElementName
+				endif,
+			inPattern <- thisModule.CInPattern(sim.source.elements->first()),
+			outPattern <- anOutPattern,
+			actionBlock <- actions
+		),
+		anOutPattern: ATL!OutPattern(
+			elements <- targetElements->collect(e | thisModule.COutPatternElement(e))
+		),
+		actions: ATL!ActionBlock(
+			statements <- targetElements->collect(e | e.imperativeFeatureSims)->flatten()->collect(e | thisModule.CBindingStat(e))
+		)
+	do{			
+		arule.name.debug('Rule');-- DEBUG
+		targetElements->collect(e | e.imperativeFeatureSims)->flatten()->size().debug('imperative feature sims');--DEBUG
+	}
+}
+
+unique lazy rule CInPattern{
+	from cl: Similarities!Classifier
+	using{
+		elm: ATL!SimpleInPatternElement = thisModule.CSimpleInPatternElement(cl);
+	}
+	to anInPattern: ATL!InPattern(
+			elements <- Set{elm}, 
+			filter <- afilter
+		),
+		afilter: ATL!OperationCallExp(
+			operationName <- 'oclIsTypeOf', 
+			source <- varExp, 
+			arguments <- Set{thisModule.COclModelElement(cl)}
+		),
+		varExp: ATL!VariableExp (
+			referredVariable <- elm
+		)	
+}
+
+unique lazy rule CSimpleInPatternElement{
+	from cl: Similarities!Classifier
+	to elm: ATL!SimpleInPatternElement(
+		varName <- cl.name.variableName, 
+		type <- thisModule.COclModelElement(cl)
+	)
+}
+
+lazy rule COutPatternElement{
+	from cl: Similarities!Classifier
+	using{
+		-- Sims to extract feature inits from
+		featureSims: Set(Similarities!Similarity) = 
+			Similarities!Similarity.allInstances()->
+			-- Extract path similarities with target class equal to 'cl'
+			select(s | (not s.isClassSimilarity) and s.target.elements->first() = cl)->
+			select(s |
+				-- Last elements of paths are to be structural features
+				s.target.elements->last().oclIsKindOf(Similarities!StructuralFeature) and
+				s.source.elements->last().oclIsKindOf(Similarities!StructuralFeature)
+			);
+
+		-- Target feature is to be of primitive type or
+		-- source feature is to be of type with only one image in target model.		
+		declarativeFeatureSims: Set(Similarities!Similarity) = 
+			featureSims->select(s | 
+				(s.target.elements->asSequence()->last().eType.isPrimitive or 
+					s.forDeclarativeInit)				
+			);
+			
+	}
+	to 
+		elm: ATL!SimpleOutPatternElement(
+			varName <- 'a' + cl.name.toLower(), 
+			type <- thisModule.COclModelElement(cl),
+			bindings <- declarativeFeatureSims->collect(s | thisModule.CBinding(s))
+		)
+	do{		
+		for(fs in declarativeFeatureSims){fs.name.debug('Declarative Feature Sims');} -- DEBUG
+
+	}
+}
+
+-- Target path of 'sim' is considered to be simple - 
+-- just a class followed by a feature.
+-- Source path has to contain even number of elements
+-- (a class is followed by a feature and vice versa).
+unique lazy rule CBinding{
+	from sim: Similarities!Similarity
+	using{
+		sourcePathTypes: Sequence(Similarities!Classifier) = 
+			sim.source.elements->select(s | s.oclIsKindOf(Similarities!Classifier))->asSequence();
+		sourcePathFeatures: Sequence(Similarities!StructuralFeature) = 
+			sim.source.elements->select(s | s.oclIsKindOf(Similarities!StructuralFeature))->asSequence();
+	}
+	to 
+		b: ATL!Binding(		
+			propertyName <- sim.target.elements->asSequence()->at(2).name			
+		),
+		-- Create exp for the first source path feature
+		navExp: ATL!NavigationOrAttributeCallExp(
+			name <- sourcePathFeatures->first().name,
+			source <- varExp
+		),
+		varExp: ATL!VariableExp(
+			referredVariable <- thisModule.CSimpleInPatternElement(sourcePathTypes->first())
+		)
+	do{		
+		
+		-- Iterate over source path features, create binding value path
+		for (f in sourcePathFeatures){
+			-- A feature is the first path feature
+			if (f = sourcePathFeatures->first()) 
+				b.value <- navExp;						
+			else{
+				-- A previous feature is one-to-many reference
+				if (thisModule.previous(sourcePathFeatures, f).oclIsTypeOf(Similarities!Reference) and 
+						thisModule.previous(sourcePathFeatures, f).upperBound <> 1){
+					b.value <- thisModule.CAny(sourcePathTypes->at(sourcePathFeatures->indexOf(f)), b.value);
+					b.value <- thisModule.CNavigationOrAttributeCallExp(f, b.value);
+				}
+				-- A previous feature is an attribute or one-to-one reference
+				else
+					b.value <- thisModule.CNavigationOrAttributeCallExp(f, b.value);
+			}
+		}
+	}
+}
+
+lazy rule CNavigationOrAttributeCallExp{
+	from f: Similarities!StructuralFeature,
+		sourceExp: ATL!OclExpression
+	to e: ATL!NavigationOrAttributeCallExp(
+		name <- f.name,
+		source <- sourceExp
+	)
+}
+
+lazy rule CAny{
+	from cl: Similarities!Classifier,	
+		sourceExp: ATL!OclExpression
+	to e: ATL!IteratorExp(
+		name <- 'any',
+		source <- sourceExp,
+		iterators <- Set{it},
+		body <- op
+	),
+	it: ATL!Iterator(
+		varName <- 'e'
+	),
+	op: ATL!OperationCallExp(
+		operationName <- 'oclIsKindOf',
+		source <- varExp,
+		arguments <- Set{thisModule.COclModelElement(cl)}
+	),
+	varExp: ATL!VariableExp (
+		referredVariable <- it
+	)	
+}
+
+
+unique lazy rule CBindingStat{
+	from sim: Similarities!Similarity
+	using{
+		sourcePathTypes: Sequence(Similarities!Classifier) = 
+			sim.source.elements->select(s | s.oclIsKindOf(Similarities!Classifier))->asSequence();
+		sourcePathFeatures: Sequence(Similarities!StructuralFeature) = 
+			sim.source.elements->select(s | s.oclIsKindOf(Similarities!StructuralFeature))->asSequence();
+
+		firstPathTypeSim: Similarities!Similarity = sim.pathTypeSims->first();
+		sourceFeatureOfType: Similarities!Classifier = firstPathTypeSim.source.elements->first();
+		targetFeatureOfType: Similarities!Classifier = firstPathTypeSim.target.elements->first();
+	}	
+	to 
+		bs: ATL!BindingStat(
+			source <- statSourceExp
+		),
+		-- Create exp for the source of the binding stat
+		statSourceExp: ATL!NavigationOrAttributeCallExp(		
+			name <- sim.target.elements->asSequence()->at(2).name,
+			source <- statSourceVar
+		),
+		statSourceVar: ATL!VariableExp(
+			referredVariable <- thisModule.CSimpleInPatternElement(sim.target.elements->first())
+		),
+		-- Create exp for the first source path feature
+		navExp: ATL!NavigationOrAttributeCallExp(
+			name <- sourcePathFeatures->first().name,
+			source <- varExp
+		),
+		varExp: ATL!VariableExp(
+			referredVariable <- thisModule.CSimpleInPatternElement(sourcePathTypes->first())
+		)		
+	do{
+		-- Iterate over source path features, create binding stat value path
+		for(f in sourcePathFeatures){
+			-- A feature is the first path feature
+			if(f = sourcePathFeatures->first())
+				bs.value <- navExp;				
+			else{
+				-- A previous feature is one-to-many reference
+				if (thisModule.previous(sourcePathFeatures, f).oclIsTypeOf(Similarities!Reference) and 
+						thisModule.previous(sourcePathFeatures, f).upperBound <> 1	){
+					bs.value <- thisModule.CAny(sourcePathTypes->at(sourcePathFeatures->indexOf(f)), bs.value);
+					bs.value <- thisModule.CNavigationOrAttributeCallExp(f, bs.value);
+				}
+				-- A previous feature is an attribute or one-to-one reference
+				else
+					bs.value <- thisModule.CNavigationOrAttributeCallExp(f, bs.value);
+			}
+		}		
+		
+		-- Source feature is of collection type, create 'select-collect' last element of binding stat value path
+		if(sourcePathFeatures->last().oclIsKindOf(Similarities!Reference) and
+			sourcePathFeatures->last().upperBound <> 1){
+			bs.value <- thisModule.CSelectCollectPathEnding(sourceFeatureOfType, targetFeatureOfType, bs.value);
+		}
+		-- Source feature is not of collection type, create 'resolveTemp' last element of binding stat value path
+		else{
+			bs.value <- thisModule.CResolveTempPathEnding(sim.target.elements->last().eType, bs.value);
+		}
+	}		
+}
+
+
+lazy rule CResolveTempPathEnding{
+	from cl: Similarities!Classifier,
+		sourceExp: ATL!OclExpression
+	to 
+		op: ATL!OperationCallExp(
+			operationName <- 'resolveTemp',
+			source <- varExp,
+			arguments <- Sequence{sourceExp, str}
+		),
+		varExp: ATL!VariableExp(
+			referredVariable <- varDecl
+		),
+		varDecl: ATL!VariableDeclaration(
+			varName <- 'thisModule'
+		),
+		str: ATL!StringExp(
+			stringSymbol <- cl.name.variableName
+		)
+}
+
+lazy rule CSelectCollectPathEnding{
+	from selectType: Similarities!Classifier,
+		resolveType: Similarities!Classifier,
+		sourceExp: ATL!OclExpression
+	to	
+		-- Create collect iterator
+		collectExp: ATL!IteratorExp(
+			name <- 'collect',
+			source <- selectExp,
+			iterators <- Set{collectIt},
+			body <- collectOp
+		),
+		collectIt: ATL!Iterator(
+			varName <- 'e'
+		),
+		collectOp: ATL!OperationCallExp(
+			operationName <- 'resolveTemp',
+			source <- collectSourceVarExp,
+			arguments <- Sequence{resolveTempArgVarExp, collectStr}
+		),
+		collectSourceVarExp: ATL!VariableExp (
+			referredVariable <- collectSourceVarDecl
+		),
+		collectSourceVarDecl: ATL!VariableDeclaration(
+			varName <- 'thisModule'
+		),
+		resolveTempArgVarExp: ATL!VariableExp(
+			referredVariable <- collectIt
+		),
+		collectStr: ATL!StringExp(
+			stringSymbol <- resolveType.name.variableName
+		),		
+		-- Create select iterator
+		selectExp: ATL!IteratorExp(
+			name <- 'select',
+			source <- sourceExp,
+			iterators <- Set{selectIt},
+			body <- selectOp			
+		),
+		selectIt: ATL!Iterator(
+			varName <- 'e'
+		),
+		selectOp: ATL!OperationCallExp(
+			operationName <- 'oclIsKindOf',
+			source <- selectVarExp,
+			arguments <- Set{thisModule.COclModelElement(selectType)}
+		),
+		selectVarExp: ATL!VariableExp (
+			referredVariable <- selectIt
+		)
+	do{
+		resolveType.name.debug('resolveType');		
+	}
+}
+
+------------------------------------------------------------------------------
+-- HELPERS
+------------------------------------------------------------------------------
+
+helper context Similarities!Similarity def: isCorrect: Boolean =
+	not self.source.elements->asSequence()->first().name.oclIsUndefined() and
+	not self.source.elements->asSequence()->first().ePackage.name.oclIsUndefined() and 
+	not self.target.elements->asSequence()->first().name.oclIsUndefined() and
+	not self.target.elements->asSequence()->first().ePackage.name.oclIsUndefined()
+;	
+	
+helper context Similarities!Similarity def: isClassSimilarity: Boolean =	
+	self.isCorrect and
+	self.source.elements->size() = 1 and
+	self.target.elements->size() = 1
+;
+
+helper context Similarities!Similarity def: firstTargetElementName: String =	
+	self.target.elements->asSequence()->first().name
+;
+
+helper context Similarities!Similarity def: firstSourceElementName: String =	
+	self.source.elements->asSequence()->first().name
+;
+
+helper context Similarities!Similarity def: sameTargetSims: Set(Similarities!Similarity) =	
+	Similarities!Similarity.allInstances()->
+		select(s | self.target.elements->first() = s.target.elements->first())	
+;
+
+helper context Similarities!Similarity def: sameSourceSims: Set(Similarities!Similarity) =	
+	Similarities!Similarity.allInstances()->
+		select(s | self.source.elements->first() = s.source.elements->first())	
+;
+
+-- Arbitrary sim to get IN and OUT model names from it		
+helper def: arbitrarySim: Similarities!Similarity =
+	Similarities!Similarity.allInstances()-> any(o | o.oclIsTypeOf(Similarities!Similarity));	
+
+helper def: sourceModelName: String =
+	let smn: String = thisModule.arbitrarySim.source.elements->asSequence()->first().ePackage.name in
+	if smn.oclIsUndefined() 
+	then 'UndefinedSourceModel'
+	else smn
+	endif;	
+
+helper def: targetModelName: String =
+	let tmn: String = thisModule.arbitrarySim.target.elements->asSequence()->first().ePackage.name in
+	if tmn.oclIsUndefined()
+	then 'UndefinedTargetModel'
+	else tmn
+	endif;
+
+
+helper def: sourceModelPackage: Similarities!Package =
+	Similarities!Package.allInstances()->any(p | p.oclIsTypeOf(Similarities!Package) 
+		and p.name = thisModule.sourceModelName);
+
+helper def: targetModelPackage: Similarities!Package =
+	Similarities!Package.allInstances()->any(p | p.oclIsTypeOf(Similarities!Package)  and 
+		p.name = thisModule.targetModelName);
+
+helper context Similarities!Classifier def: isPrimitive: Boolean =
+	if 
+		-- Simple name checking
+		self.name = 'String' or self.name = 'string' or
+		self.name = 'Boolean' or self.name = 'boolean' or
+		self.name = 'Real' or self.name = 'real' or
+		self.name = 'Integer' or self.name = 'integer' or
+		-- A type is not Class
+		(not self.oclIsTypeOf(Similarities!Class))
+	then true
+	else false
+	endif;
+
+helper context Similarities!Classifier def: numberOfImages: Integer =
+	Similarities!Similarity.allInstances()->
+		select(s | s.isClassSimilarity and s.source.elements->first() = self)->
+		size();
+
+helper context Similarities!Classifier def: counterImages: Set(Similarities!Classifier) = 
+	Similarities!Similarity.allInstances()->
+		select(s | s.isClassSimilarity and s.target.elements->first() = self)->
+		collect(s | s.source.elements->first());
+
+helper context Similarities!Classifier def: images: Set(Similarities!Classifier) = 
+	Similarities!Similarity.allInstances()->
+		select(s | s.isClassSimilarity and s.source.elements->first() = self)->
+		collect(s | s.target.elements->first());
+	
+helper context Similarities!Class def: isSubclassOf(cl: Similarities!Class): Boolean =
+	if self = cl or self.eSuperTypes->includes(cl) then true 
+	else self.eSuperTypes->exists(e | e.isSubclassOf(cl))
+	endif;
+
+-- Check whether a path sim can be used to generate declarative similarity.
+-- The following condition is to be satisfied:
+--	
+-- let the sim
+-- S.a: A ~ T.b: B
+-- 'cs' is a set of relevant path types sims.
+-- If no such sims exist then a set of sims is not correct. But declarative init is generated anyway (true is returned).
+-- Let C be a source type of first sim in 'cs',
+-- then C have to have only one image.
+helper context Similarities!Similarity def: forDeclarativeInit: Boolean =
+	if self.isClassSimilarity then false
+	else 
+		let cs: Set(Similarities!Similarity) =	self.pathTypeSims
+		in 
+			if cs->size() = 0 then true
+			else 
+				if cs->first().source.elements->first().images->size() = 1 
+				then true
+				else false
+				endif
+			endif
+	endif;
+
+-- Returns empty set for a class sim.
+-- For a path sim 
+-- S.a: A ~ T.b: B
+-- returns such class sims A1~B1 that A1 is a subtype of A, B1 is a subtype of B.
+helper context Similarities!Similarity def: pathTypeSims: Set(Similarities!Similarity) =
+	if self.isClassSimilarity then Set{}
+	else
+		Similarities!Similarity.allInstances()->
+			select(s | s.isClassSimilarity and 
+				s.source.elements->first().isSubclassOf(self.source.elements->last().eType) and
+				s.target.elements->first().isSubclassOf(self.target.elements->last().eType)
+			)
+	endif;
+
+-- Reverses a sequence of named elements.
+helper def: reverseSequence(s: Sequence(Similarities!NamedElement)): Sequence(Similarities!NamedElement) =
+	s->iterate(e; r: Sequence(Similarities!NamedElement) = Sequence{} | r.prepend(e) );
+
+-- Previous element of sequence.
+helper def: previous (s: Sequence(Similarities!NamedElement), e: Similarities!NamedElement): Similarities!NamedElement =
+	s->at(s->indexOf(e) - 1);
+
+helper context Similarities!Classifier def: imperativeFeatureSims: Sequence(Similarities!Similarity) =
+	Similarities!Similarity.allInstances()->
+		-- Extract path similarities with target class equal to 'self'
+		select(s | (not s.isClassSimilarity) and s.target.elements->first() = self)->
+		select(s |
+			-- Last elements of paths are to be structural features
+			s.target.elements->last().oclIsKindOf(Similarities!StructuralFeature) and
+			s.source.elements->last().oclIsKindOf(Similarities!StructuralFeature)
+		)->
+		-- Target feature is not to be of primitive type and
+		-- source feature is to be of type with more than one image in target model.		
+		select(s | not(s.target.elements->asSequence()->last().eType.isPrimitive) and 
+				not(s.forDeclarativeInit)				
+		);
+
+-- Create variable name from some name (e.g. from classifier name)
+helper context String def: variableName: String =
+	'a' + self.toLower();
