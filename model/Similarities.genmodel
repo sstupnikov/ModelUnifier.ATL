@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<genmodel:GenModel xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore"
+    xmlns:genmodel="http://www.eclipse.org/emf/2002/GenModel" modelDirectory="/org.ipiran.unifier.Similarities/src"
+    modelPluginID="org.ipiran.unifier.Similarities" modelName="Similarities" importerID="org.eclipse.emf.importer.ecore"
+    complianceLevel="6.0" copyrightFields="false" editPluginID="Similarities.edit"
+    editorPluginID="Similarities.editor">
+  <foreignModel>Similarities.ecore</foreignModel>
+  <genPackages prefix="Similarities" basePackage="org.ipiran.unifier" disposableProviderFactory="true"
+      ecorePackage="Similarities.ecore#/">
+    <genClasses ecoreClass="Similarities.ecore#//Similarity">
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference Similarities.ecore#//Similarity/source"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference Similarities.ecore#//Similarity/target"/>
+      <genFeatures property="None" notify="false" createChild="false" ecoreFeature="ecore:EReference Similarities.ecore#//Similarity/ePackage"/>
+    </genClasses>
+    <genClasses ecoreClass="Similarities.ecore#//Path">
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference Similarities.ecore#//Path/elements"/>
+    </genClasses>
+    <genClasses image="false" ecoreClass="Similarities.ecore#//NamedElement">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute Similarities.ecore#//NamedElement/name"/>
+    </genClasses>
+    <genClasses image="false" ecoreClass="Similarities.ecore#//Classifier">
+      <genFeatures property="None" notify="false" createChild="false" ecoreFeature="ecore:EReference Similarities.ecore#//Classifier/ePackage"/>
+    </genClasses>
+    <genClasses ecoreClass="Similarities.ecore#//Class">
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference Similarities.ecore#//Class/eStructuralFeatures"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference Similarities.ecore#//Class/eSuperTypes"/>
+    </genClasses>
+    <genClasses image="false" ecoreClass="Similarities.ecore#//TypedElement">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute Similarities.ecore#//TypedElement/upperBound"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference Similarities.ecore#//TypedElement/eType"/>
+    </genClasses>
+    <genClasses image="false" ecoreClass="Similarities.ecore#//StructuralFeature">
+      <genFeatures property="None" notify="false" createChild="false" ecoreFeature="ecore:EReference Similarities.ecore#//StructuralFeature/eContainingClass"/>
+    </genClasses>
+    <genClasses ecoreClass="Similarities.ecore#//Attribute"/>
+    <genClasses ecoreClass="Similarities.ecore#//Reference"/>
+    <genClasses ecoreClass="Similarities.ecore#//Package">
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference Similarities.ecore#//Package/eClassifiers"/>
+      <genFeatures property="None" notify="false" createChild="false" ecoreFeature="ecore:EReference Similarities.ecore#//Package/eSuperPackage"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference Similarities.ecore#//Package/eSubpackages"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference Similarities.ecore#//Package/Similarity"/>
+    </genClasses>
+    <genClasses ecoreClass="Similarities.ecore#//DataType"/>
+  </genPackages>
+</genmodel:GenModel>

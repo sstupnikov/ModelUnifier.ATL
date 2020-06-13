@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<genmodel:GenModel xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI" xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore"
+    xmlns:genmodel="http://www.eclipse.org/emf/2002/GenModel" modelDirectory="/org.ipiran.unifier.ModelRegistry/src"
+    modelPluginID="org.ipiran.unifier.ModelRegistry" modelName="ModelRegistry" importerID="org.eclipse.emf.importer.ecore"
+    complianceLevel="6.0" copyrightFields="false">
+  <foreignModel>ModelRegistry.ecore</foreignModel>
+  <genPackages prefix="ModelRegistry" basePackage="org.ipiran.unifier" disposableProviderFactory="true"
+      ecorePackage="ModelRegistry.ecore#/">
+    <genClasses image="false" ecoreClass="ModelRegistry.ecore#//RegistrationCard"/>
+    <genClasses ecoreClass="ModelRegistry.ecore#//UnificationReg">
+      <genFeatures createChild="false" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/source"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/target"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/similarities"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/mapping"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/transformationS2T"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/transformationT2S"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/samples"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//UnificationReg/isVerified"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//UnificationReg/gluing"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//UnificationReg/proof"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//ModelReg">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//ModelReg/title"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//ModelReg/shortTitle"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/abstractSyntax"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/concreteSyntax"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/syntax"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/semantics"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/semanticMapping"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/semanticTransformation"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ModelReg/semanticSpec"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//SampleReg">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//SampleReg/title"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//SampleReg/isVerified"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//SampleReg/unificationReg"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//RefinementSampleReg">
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/concreteSourceSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/abstractSourceSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/concreteTargetSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/abstractTargetSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/sourceSemSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/targetSemSpec"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//RefinementSampleReg/gluing"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//RefinementSampleReg/proof"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//EntailmentSampleReg">
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/sourceConclusionConcreteSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/sourcePremiseConcreteSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/sourceConclusionAbstractSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/sourcePremiseAbstractSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/targetConclusionConcreteSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/targetPremiseConcreteSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/targetConclusionAbstractSpec"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference ModelRegistry.ecore#//EntailmentSampleReg/targetPremiseAbstractSpec"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//EntailmentSampleReg/positive"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//Document">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//Document/title"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//Document/publisher"/>
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//Document/date"/>
+      <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//Document/authors"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//File">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute ModelRegistry.ecore#//File/reference"/>
+    </genClasses>
+    <genClasses ecoreClass="ModelRegistry.ecore#//ExtensionReg">
+      <genFeatures createChild="false" ecoreFeature="ecore:EReference ModelRegistry.ecore#//ExtensionReg/extendedModel"/>
+    </genClasses>
+  </genPackages>
+</genmodel:GenModel>
