@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension
+         point="org.eclipse.ui.editors">
+      <editor
+            class="org.ipiran.unifier.editors.ModelRegistrar"
+            default="false"
+            extensions="mrc"
+            icon="icons/Unifier-icon-16.png"
+            id="org.ipiran.unifier.editors.modelregistrar"
+            name="Model Registrar">
+      </editor>
+      <editor
+            class="org.ipiran.unifier.editors.ExtensionRegistrar"
+            default="false"
+            extensions="erc"
+            icon="icons/Unifier-icon-16.png"
+            id="org.ipiran.unifier.editors.extensionregistrar"
+            name="Extension Registrar">
+      </editor>
+      <editor
+            class="org.ipiran.unifier.editors.UnificationRegistrar"
+            default="false"
+            extensions="uni"
+            icon="icons/Unifier-icon-16.png"
+            id="org.ipiran.unifier.editors.unificationregistrar"
+            name="Unification Registrar">
+      </editor>
+   </extension>
+   <extension
+         id="org.ipiran.unifier.perspective"
+         name="Unifier Perspective"
+         point="org.eclipse.ui.perspectives">
+      <perspective
+            class="org.ipiran.unifier.UnifierGeneralPerspectiveFactory"
+            icon="icons/Unifier-icon-16.png"
+            id="org.ipiran.unifier.perspectives.general"
+            name="Unifier General Perspective">
+      </perspective>
+   </extension>
+   <extension
+         point="org.eclipse.ui.actionSets">
+      <actionSet
+            id="Unifier.ModelRegistrarActionSet"
+            label="Model Registrar Action Set"
+            visible="true">
+         <action
+               class="org.ipiran.unifier.actions.NewModelProjectAction"
+               icon="icons/NewUnifier-icon-16.png"
+               id="org.ipiran.unifier.actions.newmodelregistrar"
+               label="Model Project"
+               menubarPath="file/new/project"
+               style="push">
+         </action>
+         <action
+               class="org.ipiran.unifier.actions.NewExtensionProjectAction"
+               icon="icons/NewUnifier-icon-16.png"
+               id="org.ipiran.unifier.actions.newextensionregistrar"
+               label="Extension Project"
+               menubarPath="file/new/project"
+               style="push">
+         </action>
+         <action
+               class="org.ipiran.unifier.actions.NewUnificationProjectAction"
+               icon="icons/NewUnifier-icon-16.png"
+               id="org.ipiran.unifier.actions.newunificationregistrar"
+               label="Unification Project"
+               menubarPath="file/new/project"
+               style="push">
+         </action>
+      </actionSet>
+   </extension>
+   <extension
+         point="org.eclipse.ui.newWizards">
+      <category
+            id="org.ipiran.unifier.wizards"
+            name="Unifier Wizards">
+      </category>
+      <wizard
+            category="org.ipiran.unifier.wizards"
+            class="org.ipiran.unifier.wizards.NewUnificationProjectWizard"
+            finalPerspective="org.ipiran.unifier.perspectives.general"
+            icon="icons/NewUnifier-icon-16.png"
+            id="org.ipiran.unifier.wizards.NewUnificationProjectWizard"
+            name="New Unification Project Wizard">
+      </wizard>
+      <wizard
+            category="org.ipiran.unifier.wizards"
+            class="org.ipiran.unifier.wizards.NewModelProjectWizard"
+            finalPerspective="org.ipiran.unifier.perspectives.general"
+            icon="icons/NewUnifier-icon-16.png"
+            id="org.ipiran.unifier.wizards.NewModelProjectWizard"
+            name="New Model Project Wizard">
+      </wizard>
+      <wizard
+            category="org.ipiran.unifier.wizards"
+            class="org.ipiran.unifier.wizards.NewExtensionProjectWizard"
+            finalPerspective="org.ipiran.unifier.perspectives.general"
+            icon="icons/NewUnifier-icon-16.png"
+            id="org.ipiran.unifier.wizards.NewExtensionProjectWizard"
+            name="New Extension Project Wizard">
+      </wizard>
+   </extension>
+
+</plugin>

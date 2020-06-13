@@ -1,0 +1,19 @@
+FILE DIALOG		
+		
+FileDialog fd = new FileDialog(s, SWT.OPEN);
+fd.setText("Open");
+fd.setFilterPath("C:/");
+String[] filterExt = { "*.txt", "*.doc", ".rtf", "*.*" };
+fd.setFilterExtensions(filterExt);
+String selected = fd.open();
+
+
+FORM PAGES ITERATOR FOR FORMEDITOR
+
+for (Iterator iter = pages.iterator(); iter.hasNext(); ) {
+	Object obj = iter.next();
+	if (obj instanceof IFormPage) {
+		((IFormPage) obj).doSave(monitor);
+	}						
+}
+
